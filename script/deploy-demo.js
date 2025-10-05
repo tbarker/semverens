@@ -14,6 +14,69 @@ const path = require('path');
 const { ethers } = require('ethers');
 const { computeCIDs } = require('./computeCIDs');
 
+/**
+ * Parse command line arguments
+ */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const options = {
+    singleVersion: null,
+    help: false
+  };
+
+  for (const arg of args) {
+    if (arg === '--help' || arg === '-h') {
+      options.help = true;
+    } else if (arg === '--single-version') {
+      options.singleVersion = 'latest';
+    } else if (arg.startsWith('--single-version=')) {
+      options.singleVersion = arg.split('=')[1];
+    }
+  }
+
+  return options;
+}
+
+/**
+ * Show help text
+ */
+function showHelp() {
+  console.log(`
+SemverENS Demo Content Registration Script
+
+USAGE:
+  node script/deploy-demo.js [OPTIONS]
+
+OPTIONS:
+  --single-version[=VERSION]  Deploy only one version
+                              If VERSION is omitted, deploys latest version
+                              Example: --single-version=1.8.4
+  --help, -h                  Show this help message
+
+FEATURES:
+  - Automatically skips versions that are already published
+  - Gracefully handles partial deployments and resuming
+  - Shows detailed progress for each version
+
+ENVIRONMENT VARIABLES:
+  RESOLVER_ADDRESS           Address of deployed SemverResolver contract (required)
+  PRIVATE_KEY               Private key for signing (or use USE_TREZOR=true)
+  USE_TREZOR                Set to 'true' to use Trezor hardware wallet
+  RPC_URL                   Ethereum RPC endpoint (default: https://eth.llamarpc.com)
+  TARGET_ENS_NAME           ENS name to register versions under (default: ebooks.thomasoncrypto.eth)
+
+EXAMPLES:
+  # Deploy all versions (skips existing ones)
+  node script/deploy-demo.js
+
+  # Deploy only the latest version
+  node script/deploy-demo.js --single-version
+
+  # Deploy a specific version
+  node script/deploy-demo.js --single-version=1.8.4
+`);
+}
+
 // Mainnet ENS Registry address
 const ENS_REGISTRY_ADDRESS = '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e';
 
@@ -73,9 +136,39 @@ function loadContractABI() {
   }
 }
 
+/**
+ * Checks if a specific version already exists in the contract
+ */
+async function checkVersionExists(contract, targetNamehash, major, minor, patch) {
+  try {
+    // Call getExactVersion to check if the version exists
+    // This is a view function that returns VersionRecord(version, contentHash)
+    // If contentHash is bytes32(0), the version doesn't exist
+    const result = await contract.getExactVersion(targetNamehash, major, minor, patch);
+    return result.contentHash !== '0x0000000000000000000000000000000000000000000000000000000000000000';
+  } catch (error) {
+    // If the function call fails, assume the version doesn't exist
+    console.warn(`  ⚠️  Could not check version ${major}.${minor}.${patch}: ${error.message}`);
+    return false;
+  }
+}
+
 async function main() {
+  // Parse command line arguments
+  const options = parseArgs();
+  
+  if (options.help) {
+    showHelp();
+    process.exit(0);
+  }
+
   console.log('='.repeat(80));
   console.log('SemverENS Demo Content Registration Script');
+  if (options.singleVersion) {
+    console.log(`Mode: Single Version (${options.singleVersion === 'latest' ? 'latest' : options.singleVersion})`);
+  } else {
+    console.log('Mode: All Versions');
+  }
   console.log('='.repeat(80));
 
   // Pre-flight checks
@@ -114,6 +207,49 @@ async function main() {
     cids = await computeCIDs();
     versions = Object.values(cids);
     console.log(`✓ Computed ${versions.length} CIDs`);
+    
+    // Filter to single version if requested
+    if (options.singleVersion) {
+      if (options.singleVersion === 'latest') {
+        // Sort by semantic version and take the latest
+        versions.sort((a, b) => {
+          if (a.major !== b.major) return b.major - a.major;
+          if (a.minor !== b.minor) return b.minor - a.minor;
+          return b.patch - a.patch;
+        });
+        versions = [versions[0]];
+        console.log(`✓ Filtered to latest version: ${versions[0].major}.${versions[0].minor}.${versions[0].patch}`);
+      } else {
+        // Find specific version
+        const targetVersion = options.singleVersion;
+        const versionParts = targetVersion.split('.').map(x => parseInt(x));
+        if (versionParts.length !== 3 || versionParts.some(isNaN)) {
+          console.error(`\n✗ ERROR: Invalid version format: ${targetVersion}`);
+          console.log('Version must be in format X.Y.Z (e.g., 1.8.4)');
+          process.exit(1);
+        }
+        
+        const [targetMajor, targetMinor, targetPatch] = versionParts;
+        const filtered = versions.filter(v => 
+          v.major === targetMajor && v.minor === targetMinor && v.patch === targetPatch
+        );
+        
+        if (filtered.length === 0) {
+          console.error(`\n✗ ERROR: Version ${targetVersion} not found in demo files`);
+          console.log('\nAvailable versions:');
+          const sortedVersions = Object.values(cids).sort((a, b) => {
+            if (a.major !== b.major) return a.major - b.major;
+            if (a.minor !== b.minor) return a.minor - b.minor;
+            return a.patch - b.patch;
+          });
+          sortedVersions.forEach(v => console.log(`  ${v.major}.${v.minor}.${v.patch}`));
+          process.exit(1);
+        }
+        
+        versions = filtered;
+        console.log(`✓ Filtered to specific version: ${targetVersion}`);
+      }
+    }
   } catch (error) {
     console.error('\n✗ ERROR: Failed to compute CIDs');
     console.error(`Details: ${error.message}`);
@@ -235,14 +371,32 @@ async function main() {
   console.log(`Target namehash: ${targetNamehash}`);
 
   // Step 4: Register versions
-  console.log(`\n[Step 4/4] Registering ${versions.length} versions...`);
-  console.log('This will take several minutes...\n');
+  console.log(`\n[Step 4/4] Registering ${versions.length} version${versions.length === 1 ? '' : 's'}...`);
+  if (versions.length > 1) {
+    console.log('This will take several minutes...\n');
+  } else {
+    console.log('This should only take a moment...\n');
+  }
+
+  let skippedCount = 0;
+  let publishedCount = 0;
 
   for (let i = 0; i < versions.length; i++) {
     const v = versions[i];
     const versionStr = `${v.major}.${v.minor}.${v.patch}`;
 
-    console.log(`[${i + 1}/${versions.length}] Registering version ${versionStr}...`);
+    console.log(`[${i + 1}/${versions.length}] Checking version ${versionStr}...`);
+
+    // Check if version already exists
+    const exists = await checkVersionExists(contract, targetNamehash, v.major, v.minor, v.patch);
+    
+    if (exists) {
+      console.log(`  ⏭️  Already published - skipping`);
+      skippedCount++;
+      continue;
+    }
+
+    console.log(`  📤 Publishing...`);
 
     try {
       const tx = await contract.publishContent(
@@ -256,20 +410,28 @@ async function main() {
       console.log(`  Transaction: ${tx.hash}`);
       await tx.wait();
       console.log(`  ✓ Confirmed`);
+      publishedCount++;
     } catch (error) {
       console.error(`  ✗ Failed: ${error.message}`);
       throw error;
     }
   }
 
-  console.log(`\n✓ All ${versions.length} versions registered successfully`);
-
   // Summary
   console.log('\n' + '='.repeat(80));
   console.log('✓ Content registration completed successfully!');
   console.log('='.repeat(80));
   console.log(`\nResolver address: ${resolverAddress}`);
-  console.log(`Versions registered: ${versions.length}`);
+  console.log(`Versions processed: ${versions.length}`);
+  console.log(`  📤 Published: ${publishedCount}`);
+  if (skippedCount > 0) {
+    console.log(`  ⏭️  Skipped (already exist): ${skippedCount}`);
+  }
+  if (versions.length === 1) {
+    const v = versions[0];
+    const status = skippedCount > 0 ? 'skipped' : 'published';
+    console.log(`Version ${v.major}.${v.minor}.${v.patch}: ${status}`);
+  }
   console.log(`Target namehash: ${targetNamehash}`);
   console.log(`Target ENS name: ${targetName}`);
 

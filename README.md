@@ -145,7 +145,7 @@ forge script script/DeploySemverResolver.s.sol:DeploySemverResolver \
 - Hardware device connected and unlocked
 - You'll need to confirm the transaction on your device
 
-**Gas Cost:** ~3.20M gas for deployment (≈$9.60 at 0.5 gwei / $3000 ETH)
+**Gas Cost:** ~2.82M gas for deployment (≈$8.47 at 1 gwei / $3000 ETH)
 
 #### Manual Verification (Post-Deployment)
 
@@ -162,7 +162,7 @@ forge verify-contract <CONTRACT_ADDRESS> \
 
 ### Registering Demo Content
 
-Register demo content to an existing SemverResolver. This registers 23 demo versions (1.0.0 through 1.8.4).
+Register demo content to an existing SemverResolver. You can register all 23 demo versions (1.0.0 through 1.8.4) or just a single version for testing.
 
 #### Option 1: Using Private Key
 
@@ -177,7 +177,15 @@ npm run show-cids
 export PRIVATE_KEY=0x...
 export RESOLVER_ADDRESS=0x...
 export TARGET_ENS_NAME=yourdomain.eth  # Optional
+
+# Register all 23 versions
 npm run deploy
+
+# Or register just the latest version for testing
+node script/deploy-demo.js --single-version
+
+# Or register a specific version
+node script/deploy-demo.js --single-version=1.8.4
 ```
 
 **Environment Variables:**
@@ -198,16 +206,25 @@ export USE_TREZOR=true
 export TREZOR_PATH="m/44'/60'/0'/0/0"  # Optional, this is the default
 export RESOLVER_ADDRESS=0x...
 export TARGET_ENS_NAME=yourdomain.eth
+
+# Register all 23 versions
 npm run deploy
+
+# Or register just the latest version
+node script/deploy-demo.js --single-version
+
+# Or register a specific version
+node script/deploy-demo.js --single-version=1.8.4
 ```
 
-**Important:** You will need to confirm each transaction on your hardware device. For 23 versions, this means 23 confirmations.
+**Important:** You will need to confirm each transaction on your hardware device. For all 23 versions, this means 23 confirmations. For single version deployment, only 1 confirmation is needed.
 
 **Additional Environment Variables for Hardware Wallets:**
 - `USE_TREZOR=true` (required): Enable Trezor signing
 - `TREZOR_PATH` (optional): Derivation path (default: `m/44'/60'/0'/0/0`)
 
-**Gas Cost for 23 versions:** ~2.64M gas (≈$7.92 at 0.5 gwei / $3000 ETH)
+**Gas Cost per version:** ~115k gas (≈$0.35 at 1 gwei / $3000 ETH)
+**Gas Cost for 23 versions:** ~2.65M gas (≈$7.95 at 1 gwei / $3000 ETH)
 
 ## Implementation Details
 
