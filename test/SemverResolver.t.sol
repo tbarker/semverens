@@ -852,7 +852,7 @@ contract SemverResolverTest is Test {
         semverLibWrapper.parseVersionFromLabel("1:2:999999999");
     }
 
-    function testParseVersionFromLabelExtremeBoundaryValues() public {
+    function testParseVersionFromLabelExtremeBoundaryValues() view public {
         // Test values at exact overflow boundaries to ensure proper validation
 
         // Test 254 vs 255 for major (both should work)
