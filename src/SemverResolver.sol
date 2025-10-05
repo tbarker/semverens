@@ -23,6 +23,11 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     // Precomputed hash for "version" key to save gas
     bytes32 private constant VERSION_KEY_HASH = keccak256("version");
 
+    // IPFS CIDv1 dag-pb contenthash with multihash prefix for ENS (EIP-1577)
+    // Format: <protocol><cid-version><content-type><hash-function><hash-length>
+    // 0xe3 = IPFS protocol, 0x01 = CIDv1, 0x70 = dag-pb, 0x12 = sha2-256, 0x20 = 32 bytes
+    bytes5 private constant IPFS_CONTENTHASH_PREFIX = hex"e301701220";
+
     ENS public immutable ENS_REGISTRY;
     INameWrapper public immutable NAME_WRAPPER;
 
@@ -80,6 +85,17 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         NAME_WRAPPER = _nameWrapper;
     }
 
+    /// @dev Encodes a raw IPFS hash for ENS contenthash (EIP-1577)
+    /// @param rawHash Raw 32-byte IPFS hash (sha256 digest)
+    /// @return Properly encoded contenthash with IPFS CIDv1 dag-pb multihash prefix (0xe301701220)
+    function _encodeIpfsContenthash(bytes32 rawHash) internal pure returns (bytes memory) {
+        if (rawHash == bytes32(0)) {
+            return "";
+        }
+        // Encode IPFS hash with proper multihash prefix for ENS contenthash (EIP-1577)
+        return abi.encodePacked(IPFS_CONTENTHASH_PREFIX, rawHash);
+    }
+
     /// @notice Checks if this contract implements a given interface
     /// @param interfaceId The interface identifier to check (ERC-165)
     /// @return True if the interface is supported, false otherwise
@@ -128,10 +144,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     /// @dev Implements IContentHashResolver interface for direct (non-wildcard) queries
     function contenthash(bytes32 node) external view override returns (bytes memory) {
         bytes32 hash = getLatestContentHash(node);
-        if (hash == bytes32(0)) {
-            return "";
-        }
-        return abi.encodePacked(hash);
+        return _encodeIpfsContenthash(hash);
     }
 
     /// @notice Returns text data for a given key
@@ -224,7 +237,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
             return "";
         }
 
-        return abi.encode(result.contentHash);
+        return _encodeIpfsContenthash(result.contentHash);
     }
 
     /// @dev Resolves text record (version string) for wildcard version queries
@@ -248,7 +261,12 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     /// @param major The major version number (0-255)
     /// @param minor The minor version number (0-255)
     /// @param patch The patch version number (0-65535)
-    /// @param contentHash The IPFS or other content hash for this version
+    /// @param contentHash Raw IPFS hash (32 bytes, sha256 digest only)
+    /// @dev contentHash should be the raw sha256 hash from IPFS CID, not the full CID
+    /// @dev For JavaScript: use `ipfs.add()` then extract hash from CID using libraries like:
+    /// @dev - multiformats: `CID.parse(cid).multihash.digest`
+    /// @dev - ipfs-http-client: built-in hash extraction utilities
+    /// @dev The resolver automatically encodes this as EIP-1577 contenthash for ENS compatibility
     /// @dev Only callable by the ENS name owner or approved operators
     /// @dev Version must be strictly greater than all existing versions (enforced by addVersion)
     /// @dev Emits ContenthashChanged and TextChanged events
@@ -259,7 +277,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         addVersion(namehash, major, minor, patch, contentHash);
 
         // Emit ContenthashChanged event for the new content hash
-        emit ContenthashChanged(namehash, abi.encodePacked(contentHash));
+        emit ContenthashChanged(namehash, _encodeIpfsContenthash(contentHash));
 
         // Emit TextChanged event for the "version" key since it will now return the new version
         string memory newVersion = _versionToString(_createVersion(major, minor, patch));

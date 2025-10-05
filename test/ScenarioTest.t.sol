@@ -59,6 +59,14 @@ contract ScenarioTest is Test {
         return result;
     }
 
+    /// @dev Helper to encode raw IPFS hash with proper multihash prefix
+    function encodeIpfsContenthash(bytes32 rawHash) internal pure returns (bytes memory) {
+        if (rawHash == bytes32(0)) {
+            return "";
+        }
+        return abi.encodePacked(hex"e301701220", rawHash);
+    }
+
     // ========== Drupal Helpers ==========
 
     function publishDrupal(string memory releaseName, uint8 major, uint8 minor, uint16 patch) internal {
@@ -89,7 +97,12 @@ contract ScenarioTest is Test {
         if (hashBytes.length == 0) {
             return bytes32(0);
         }
-        return BytesUtils.readBytes32(hashBytes, 0);
+        // Skip the 5-byte IPFS multihash prefix to get the raw hash
+        if (hashBytes.length < 37) {
+            // 5 byte prefix + 32 byte hash
+            return bytes32(0);
+        }
+        return BytesUtils.readBytes32(hashBytes, 5);
     }
 
     /// @notice Comprehensive interleaved test of Accumulo and Drupal version histories
@@ -349,13 +362,10 @@ contract ScenarioTest is Test {
         bytes memory accumHash = resolver.contenthash(ACCUMULO_NODE);
         bytes memory drupalHash = resolver.contenthash(DRUPAL_NODE);
 
-        bytes32 accumHash32 = BytesUtils.readBytes32(accumHash, 0);
-        bytes32 drupalHash32 = BytesUtils.readBytes32(drupalHash, 0);
-
-        assertEq(accumHash32, getAccumuloHash("1.10.3"), "Accumulo contenthash should be 1.10.3");
-        assertEq(drupalHash32, getDrupalHash("11.1.8"), "Drupal contenthash should be 11.1.8");
+        assertEq(accumHash, encodeIpfsContenthash(getAccumuloHash("1.10.3")), "Accumulo contenthash should be 1.10.3");
+        assertEq(drupalHash, encodeIpfsContenthash(getDrupalHash("11.1.8")), "Drupal contenthash should be 11.1.8");
 
         // Verify they're different
-        assertTrue(accumHash32 != drupalHash32, "Hashes should be different");
+        assertTrue(keccak256(accumHash) != keccak256(drupalHash), "Hashes should be different");
     }
 }

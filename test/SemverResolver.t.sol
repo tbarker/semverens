@@ -84,6 +84,14 @@ contract SemverResolverTest is Test {
         return result;
     }
 
+    /// @dev Helper to encode raw IPFS hash with proper multihash prefix
+    function encodeIpfsContenthash(bytes32 rawHash) internal pure returns (bytes memory) {
+        if (rawHash == bytes32(0)) {
+            return "";
+        }
+        return abi.encodePacked(hex"e301701220", rawHash);
+    }
+
     // === Version Text Resolution Tests ===
 
     function testTextVersionKeyNoVersions() public view {
@@ -152,7 +160,7 @@ contract SemverResolverTest is Test {
 
         // Expect ContenthashChanged event
         vm.expectEmit(true, false, false, true);
-        emit IContentHashResolver.ContenthashChanged(TEST_NODE, abi.encode(CONTENT_HASH_1));
+        emit IContentHashResolver.ContenthashChanged(TEST_NODE, encodeIpfsContenthash(CONTENT_HASH_1));
 
         // Expect TextChanged event for version
         vm.expectEmit(true, false, false, true);
@@ -165,7 +173,7 @@ contract SemverResolverTest is Test {
         // First publication
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit IContentHashResolver.ContenthashChanged(TEST_NODE, abi.encode(CONTENT_HASH_1));
+        emit IContentHashResolver.ContenthashChanged(TEST_NODE, encodeIpfsContenthash(CONTENT_HASH_1));
         vm.expectEmit(true, false, false, true);
         emit ITextResolver.TextChanged(TEST_NODE, "version", "version", "1.0.0");
         resolver.publishContent(TEST_NODE, 1, 0, 0, CONTENT_HASH_1);
@@ -173,7 +181,7 @@ contract SemverResolverTest is Test {
         // Second publication - version should update
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit IContentHashResolver.ContenthashChanged(TEST_NODE, abi.encode(CONTENT_HASH_2));
+        emit IContentHashResolver.ContenthashChanged(TEST_NODE, encodeIpfsContenthash(CONTENT_HASH_2));
         vm.expectEmit(true, false, false, true);
         emit ITextResolver.TextChanged(TEST_NODE, "version", "version", "2.1.5");
         resolver.publishContent(TEST_NODE, 2, 1, 5, CONTENT_HASH_2);
@@ -393,19 +401,19 @@ contract SemverResolverTest is Test {
         bytes memory result1 = resolver.resolve(encodeDnsName("255", "test.eth"), selector);
         bytes memory hash1 = abi.decode(result1, (bytes));
         assertGt(hash1.length, 0, "Should return contenthash");
-        assertEq(BytesUtils.readBytes32(hash1, 0), CONTENT_HASH_3);
+        assertEq(hash1, encodeIpfsContenthash(CONTENT_HASH_3));
 
         // Test major.minor query (255:255 → finds 255.255.65535 as highest 255.255.x)
         bytes memory result2 = resolver.resolve(encodeDnsName("255:255", "test.eth"), selector);
         bytes memory hash2 = abi.decode(result2, (bytes));
         assertGt(hash2.length, 0, "Should return contenthash");
-        assertEq(BytesUtils.readBytes32(hash2, 0), CONTENT_HASH_3);
+        assertEq(hash2, encodeIpfsContenthash(CONTENT_HASH_3));
 
         // Test exact query (255:255:65535 → finds exact match)
         bytes memory result3 = resolver.resolve(encodeDnsName("255:255:65535", "test.eth"), selector);
         bytes memory hash3 = abi.decode(result3, (bytes));
         assertGt(hash3.length, 0, "Should return contenthash");
-        assertEq(BytesUtils.readBytes32(hash3, 0), CONTENT_HASH_3);
+        assertEq(hash3, encodeIpfsContenthash(CONTENT_HASH_3));
     }
 
     function testVersionParsingMalformedLabelsStillRevert() public {
@@ -444,13 +452,13 @@ contract SemverResolverTest is Test {
         bytes memory result1 = resolver.resolve(encodeDnsName("255:255:65535", "test.eth"), selector);
         bytes memory hash1 = abi.decode(result1, (bytes));
         assertGt(hash1.length, 0, "Should return contenthash");
-        assertEq(BytesUtils.readBytes32(hash1, 0), CONTENT_HASH_2);
+        assertEq(hash1, encodeIpfsContenthash(CONTENT_HASH_2));
 
         // Test one below max
         bytes memory result2 = resolver.resolve(encodeDnsName("254:254:65534", "test.eth"), selector);
         bytes memory hash2 = abi.decode(result2, (bytes));
         assertGt(hash2.length, 0, "Should return contenthash");
-        assertEq(BytesUtils.readBytes32(hash2, 0), CONTENT_HASH_1);
+        assertEq(hash2, encodeIpfsContenthash(CONTENT_HASH_1));
     }
 
     /// @notice Test that "2", "2:0", and "2:0:0" are distinguished correctly
@@ -476,16 +484,14 @@ contract SemverResolverTest is Test {
         bytes memory result2 = resolver.resolve(encodeDnsName("2", "test.eth"), selector);
         bytes memory hash2 = abi.decode(result2, (bytes));
         assertGt(hash2.length, 0, "Should return contenthash");
-        assertEq(
-            BytesUtils.readBytes32(hash2, 0), keccak256("2.2.0"), "Query '2' should resolve to highest 2.x.x (2.2.0)"
-        );
+        assertEq(hash2, encodeIpfsContenthash(keccak256("2.2.0")), "Query '2' should resolve to highest 2.x.x (2.2.0)");
 
         // Query "2:0" (major.minor, hasMinor=true, hasPatch=false) - should get highest 2.0.x
         bytes memory result20 = resolver.resolve(encodeDnsName("2:0", "test.eth"), selector);
         bytes memory hash20 = abi.decode(result20, (bytes));
         assertGt(hash20.length, 0, "Should return contenthash");
         assertEq(
-            BytesUtils.readBytes32(hash20, 0), keccak256("2.0.5"), "Query '2:0' should resolve to highest 2.0.x (2.0.5)"
+            hash20, encodeIpfsContenthash(keccak256("2.0.5")), "Query '2:0' should resolve to highest 2.0.x (2.0.5)"
         );
 
         // Query "2:1" (major.minor) - should get highest 2.1.x
@@ -493,7 +499,7 @@ contract SemverResolverTest is Test {
         bytes memory hash21 = abi.decode(result21, (bytes));
         assertGt(hash21.length, 0, "Should return contenthash");
         assertEq(
-            BytesUtils.readBytes32(hash21, 0), keccak256("2.1.3"), "Query '2:1' should resolve to highest 2.1.x (2.1.3)"
+            hash21, encodeIpfsContenthash(keccak256("2.1.3")), "Query '2:1' should resolve to highest 2.1.x (2.1.3)"
         );
 
         // Query "2:0:0" (exact, hasMinor=true, hasPatch=true) - should get exact 2.0.0
@@ -501,9 +507,7 @@ contract SemverResolverTest is Test {
         bytes memory hash200 = abi.decode(result200, (bytes));
         assertGt(hash200.length, 0, "Should return contenthash");
         assertEq(
-            BytesUtils.readBytes32(hash200, 0),
-            keccak256("2.0.0"),
-            "Query '2:0:0' should resolve to exact version 2.0.0"
+            hash200, encodeIpfsContenthash(keccak256("2.0.0")), "Query '2:0:0' should resolve to exact version 2.0.0"
         );
 
         // Query "2:0:1" (exact) - should get exact 2.0.1
@@ -511,9 +515,7 @@ contract SemverResolverTest is Test {
         bytes memory hash201 = abi.decode(result201, (bytes));
         assertGt(hash201.length, 0, "Should return contenthash");
         assertEq(
-            BytesUtils.readBytes32(hash201, 0),
-            keccak256("2.0.1"),
-            "Query '2:0:1' should resolve to exact version 2.0.1"
+            hash201, encodeIpfsContenthash(keccak256("2.0.1")), "Query '2:0:1' should resolve to exact version 2.0.1"
         );
 
         // Query "2:1:0" (exact) - should get exact 2.1.0
@@ -521,9 +523,7 @@ contract SemverResolverTest is Test {
         bytes memory hash210 = abi.decode(result210, (bytes));
         assertGt(hash210.length, 0, "Should return contenthash");
         assertEq(
-            BytesUtils.readBytes32(hash210, 0),
-            keccak256("2.1.0"),
-            "Query '2:1:0' should resolve to exact version 2.1.0"
+            hash210, encodeIpfsContenthash(keccak256("2.1.0")), "Query '2:1:0' should resolve to exact version 2.1.0"
         );
 
         // Verify text resolution also works correctly
@@ -638,8 +638,9 @@ contract SemverResolverTest is Test {
         resolver.publishContent(TEST_NODE, 1, 2, 3, CONTENT_HASH_1);
 
         bytes memory hash = resolver.contenthash(TEST_NODE);
+        bytes memory expectedHash = encodeIpfsContenthash(CONTENT_HASH_1);
         assertGt(hash.length, 0, "Should return non-empty hash");
-        assertEq(BytesUtils.readBytes32(hash, 0), CONTENT_HASH_1, "Should return correct hash");
+        assertEq(hash, expectedHash, "Should return correct hash");
     }
 
     function testContenthashDirectResolutionEmpty() public view {
@@ -852,7 +853,7 @@ contract SemverResolverTest is Test {
         semverLibWrapper.parseVersionFromLabel("1:2:999999999");
     }
 
-    function testParseVersionFromLabelExtremeBoundaryValues() view public {
+    function testParseVersionFromLabelExtremeBoundaryValues() public view {
         // Test values at exact overflow boundaries to ensure proper validation
 
         // Test 254 vs 255 for major (both should work)
