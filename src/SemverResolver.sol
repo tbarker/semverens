@@ -14,7 +14,7 @@ import {VersionRegistry} from "./VersionRegistry.sol";
 
 /// @title SemverResolver
 /// @notice ENS resolver with semantic versioning support and wildcard resolution
-/// @dev Implements IExtendedResolver for wildcard queries (e.g., "1:2.myapp.eth" resolves to highest 1.2.x version)
+/// @dev Implements IExtendedResolver for wildcard queries (e.g., "1-2.myapp.eth" resolves to highest 1.2.x version)
 /// @dev Supports contenthash and text("version") resolution for versioned content
 contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResolver, ITextResolver, IERC165 {
     // ABI encoding constants
@@ -107,7 +107,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     }
 
     /// @notice Wildcard resolution entry point (ENSIP-10)
-    /// @param name DNS-encoded name (e.g., "\x031:2\x06myapp\x03eth\x00")
+    /// @param name DNS-encoded name (e.g., "\x031-2\x06myapp\x03eth\x00")
     /// @param data ABI-encoded function call (selector + arguments)
     /// @return ABI-encoded return value from the resolved function
     /// @dev First tries direct resolution, falls back to wildcard if no result
@@ -171,13 +171,13 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     }
 
     /// @dev Core wildcard version resolution logic
-    /// @param name DNS-encoded name where first label is version (e.g., "\x031:2\x06myapp\x03eth\x00")
+    /// @param name DNS-encoded name where first label is version (e.g., "\x031-2\x06myapp\x03eth\x00")
     /// @return Version record with the highest matching version, or zero version if not found
     /// @notice Supports three query types:
     ///   - Major-only: "1" → finds highest 1.x.x version
-    ///   - Major.minor: "1:2" → finds highest 1.2.x version
-    ///   - Exact: "1:2:3" → finds exact 1.2.3 version
-    /// @notice Uses colon separators instead of dots to avoid DNS label conflicts
+    ///   - Major.minor: "1-2" → finds highest 1.2.x version
+    ///   - Exact: "1-2-3" → finds exact 1.2.3 version
+    /// @notice Uses hyphen separators instead of dots to avoid DNS label conflicts
     /// @notice Returns zero version (0.0.0) if no matching version exists
     function _resolveWildcardVersion(bytes memory name) internal view returns (VersionRecord memory) {
         // Extract the first label from the DNS-encoded name
@@ -185,34 +185,34 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         // which will revert with DNSDecodingFailed for invalid names before reaching this point
         uint256 labelLength = uint256(uint8(name[0]));
 
-        // Extract the version label (first label, e.g., "1:2" from "1:2.myapp.eth")
+        // Extract the version label (first label, e.g., "1-2" from "1-2.myapp.eth")
         bytes memory versionLabel = BytesUtils.substring(name, 1, labelLength);
 
-        // Extract the remainder (base name, e.g., "myapp.eth" from "1:2.myapp.eth")
+        // Extract the remainder (base name, e.g., "myapp.eth" from "1-2.myapp.eth")
         bytes memory baseName = BytesUtils.substring(name, labelLength + 1, name.length - labelLength - 1);
 
         // Compute the namehash of the base name
         bytes32 baseNode = NameCoder.namehash(baseName, 0);
 
-        // Parse the version from the label (uses colon-separated format: "1:2:3")
+        // Parse the version from the label (uses hyphen-separated format: "1-2-3")
         // Note: _parseVersionFromLabel will revert if the label is invalid
         // The resolve() function in IExtendedResolver will catch any reverts
         ParsedVersion memory parsedVersion = _parseVersionFromLabel(string(versionLabel));
 
         // Determine query type based on which components were explicitly specified
         // "1" (hasMinor=false) → find highest 1.x.x
-        // "1:2" (hasMinor=true, hasPatch=false) → find highest 1.2.x
-        // "1:2:3" (hasPatch=true) → find exact 1.2.3
+        // "1-2" (hasMinor=true, hasPatch=false) → find highest 1.2.x
+        // "1-2-3" (hasPatch=true) → find exact 1.2.3
         VersionRecord memory result;
 
         if (!parsedVersion.hasMinor) {
             // Major-only query: find highest version with matching major (e.g., "1" matches 1.x.x)
             result = getHighestVersionForMajor(baseNode, parsedVersion.version.major);
         } else if (!parsedVersion.hasPatch) {
-            // Major.minor query: find highest version with matching major.minor (e.g., "1:2" matches 1.2.x)
+            // Major.minor query: find highest version with matching major.minor (e.g., "1-2" matches 1.2.x)
             result = getHighestVersionForMajorMinor(baseNode, parsedVersion.version.major, parsedVersion.version.minor);
         } else {
-            // Exact version query: find exact match (e.g., "1:2:3" matches 1.2.3 only)
+            // Exact version query: find exact match (e.g., "1-2-3" matches 1.2.3 only)
             result = getExactVersion(
                 baseNode, parsedVersion.version.major, parsedVersion.version.minor, parsedVersion.version.patch
             );
@@ -222,7 +222,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     }
 
     /// @dev Resolves contenthash for wildcard version queries
-    /// @param name DNS-encoded name with version prefix (e.g., "\x031:2\x06myapp\x03eth\x00")
+    /// @param name DNS-encoded name with version prefix (e.g., "\x031-2\x06myapp\x03eth\x00")
     /// @return ABI-encoded content hash of the matched version, or empty bytes if no match
     /// @notice This function is called by resolve() when direct contenthash lookup fails
     function _resolveWildcardContenthash(bytes memory name, bytes memory /* data */ )
@@ -241,7 +241,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     }
 
     /// @dev Resolves text record (version string) for wildcard version queries
-    /// @param name DNS-encoded name with version prefix (e.g., "\x031:2\x06myapp\x03eth\x00")
+    /// @param name DNS-encoded name with version prefix (e.g., "\x031-2\x06myapp\x03eth\x00")
     /// @return Version string of the matched version (e.g., "1.2.3"), or empty if no match
     /// @notice This function is called by resolve() for text("version") wildcard queries
     function _resolveWildcardText(bytes memory name, string memory /* key */ ) internal view returns (string memory) {

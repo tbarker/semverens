@@ -125,8 +125,8 @@ contract ScenarioTest is Test {
         // Phase 3: Continue Accumulo 1.4.x series
         publishAccumulo("1.4.1", 1, 4, 1);
         publishAccumulo("1.4.5", 1, 4, 5);
-        bytes32 accum14 = decodeContenthash(dnsEncodeAccumulo("1:4"), accumuloSelector);
-        assertEq(accum14, getAccumuloHash("1.4.5"), "Accumulo 1:4 should resolve to 1.4.5");
+        bytes32 accum14 = decodeContenthash(dnsEncodeAccumulo("1-4"), accumuloSelector);
+        assertEq(accum14, getAccumuloHash("1.4.5"), "Accumulo 1-4 should resolve to 1.4.5");
 
         // Phase 4: Continue Drupal 7.x and start 8.x
         publishDrupal("7.103", 7, 103, 0);
@@ -148,8 +148,8 @@ contract ScenarioTest is Test {
         publishDrupal("9.5.11", 9, 5, 11);
 
         // Verify cross-isolation: Accumulo queries shouldn't see Drupal data
-        bytes32 accum19 = decodeContenthash(dnsEncodeAccumulo("1:9"), accumuloSelector);
-        assertEq(accum19, getAccumuloHash("1.9.3"), "Accumulo 1:9 should resolve to 1.9.3");
+        bytes32 accum19 = decodeContenthash(dnsEncodeAccumulo("1-9"), accumuloSelector);
+        assertEq(accum19, getAccumuloHash("1.9.3"), "Accumulo 1-9 should resolve to 1.9.3");
         bytes32 drupal9 = decodeContenthash(dnsEncodeDrupal("9"), drupalSelector);
         assertEq(drupal9, getDrupalHash("9.5.11"), "Drupal 9 should resolve to 9.5.11");
 
@@ -217,11 +217,11 @@ contract ScenarioTest is Test {
         assertEq(drupal9, getDrupalHash("9.2.21"), "Drupal 9 should resolve to 9.2.21");
 
         // Query "10:2" for both
-        bytes32 accum102 = decodeContenthash(dnsEncodeAccumulo("10:2"), accumuloSelector);
-        bytes32 drupal102 = decodeContenthash(dnsEncodeDrupal("10:2"), drupalSelector);
+        bytes32 accum102 = decodeContenthash(dnsEncodeAccumulo("10-2"), accumuloSelector);
+        bytes32 drupal102 = decodeContenthash(dnsEncodeDrupal("10-2"), drupalSelector);
 
         assertEq(accum102, bytes32(0), "Accumulo has no version 10.2.x");
-        assertEq(drupal102, getDrupalHash("10.2.3"), "Drupal 10:2 should resolve to 10.2.3");
+        assertEq(drupal102, getDrupalHash("10.2.3"), "Drupal 10-2 should resolve to 10.2.3");
     }
 
     /// @notice Test that unauthorized users cannot publish to wrong namehashes
@@ -303,25 +303,25 @@ contract ScenarioTest is Test {
         bytes memory drupalSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, DRUPAL_NODE);
 
         // Query exact version 1:9:2 for both
-        bytes32 accum192 = decodeContenthash(dnsEncodeAccumulo("1:9:2"), accumuloSelector);
-        bytes32 drupal192 = decodeContenthash(dnsEncodeDrupal("1:9:2"), drupalSelector);
+        bytes32 accum192 = decodeContenthash(dnsEncodeAccumulo("1-9-2"), accumuloSelector);
+        bytes32 drupal192 = decodeContenthash(dnsEncodeDrupal("1-9-2"), drupalSelector);
 
-        assertEq(accum192, getAccumuloHash("1.9.2"), "Accumulo 1:9:2 should be exact");
-        assertEq(drupal192, bytes32(0), "Drupal has no 1:9:2");
+        assertEq(accum192, getAccumuloHash("1.9.2"), "Accumulo 1-9-2 should be exact");
+        assertEq(drupal192, bytes32(0), "Drupal has no 1-9-2");
 
         // Query exact version 9:1:2 for both
-        bytes32 accum912 = decodeContenthash(dnsEncodeAccumulo("9:1:2"), accumuloSelector);
-        bytes32 drupal912 = decodeContenthash(dnsEncodeDrupal("9:1:2"), drupalSelector);
+        bytes32 accum912 = decodeContenthash(dnsEncodeAccumulo("9-1-2"), accumuloSelector);
+        bytes32 drupal912 = decodeContenthash(dnsEncodeDrupal("9-1-2"), drupalSelector);
 
-        assertEq(accum912, bytes32(0), "Accumulo has no 9:1:2");
-        assertEq(drupal912, getDrupalHash("9.1.2"), "Drupal 9:1:2 should be exact");
+        assertEq(accum912, bytes32(0), "Accumulo has no 9-1-2");
+        assertEq(drupal912, getDrupalHash("9.1.2"), "Drupal 9-1-2 should be exact");
 
         // Query highest in series
-        bytes32 accum19 = decodeContenthash(dnsEncodeAccumulo("1:9"), accumuloSelector);
-        bytes32 drupal91 = decodeContenthash(dnsEncodeDrupal("9:1"), drupalSelector);
+        bytes32 accum19 = decodeContenthash(dnsEncodeAccumulo("1-9"), accumuloSelector);
+        bytes32 drupal91 = decodeContenthash(dnsEncodeDrupal("9-1"), drupalSelector);
 
-        assertEq(accum19, getAccumuloHash("1.9.3"), "Accumulo 1:9 should be 1.9.3");
-        assertEq(drupal91, getDrupalHash("9.1.15"), "Drupal 9:1 should be 9.1.15");
+        assertEq(accum19, getAccumuloHash("1.9.3"), "Accumulo 1-9 should be 1.9.3");
+        assertEq(drupal91, getDrupalHash("9.1.15"), "Drupal 9-1 should be 9.1.15");
     }
 
     /// @notice Test text record resolution isolation

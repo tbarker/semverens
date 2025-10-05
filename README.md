@@ -52,10 +52,10 @@ app.myproject.eth → latest content hash
 1.app.myproject.eth → latest v1.x.x content hash
 
 # Specific major.minor version
-1:2.app.myproject.eth → latest v1.2.x content hash
+1-2.app.myproject.eth → latest v1.2.x content hash
 ```
 
-**Note**: Colons (`:`) are used instead of dots in version labels to avoid conflicts with DNS label separators.
+**Note**: Hyphens (`-`) are used instead of dots in version labels to avoid conflicts with DNS label separators.
 
 ### Publishing Versions
 
@@ -92,9 +92,9 @@ forge build
 ### Testing
 
 ```bash
-forge test                                    # Run all tests (36 total)
-forge test --match-contract SemverResolverTest    # 12 tests
-forge test --match-contract VersionRegistryTest   # 24 tests
+forge test                                    # Run all tests
+forge test --match-contract SemverResolverTest
+forge test --match-contract VersionRegistryTest
 ```
 
 ### Deploying SemverResolver Contract
@@ -259,8 +259,8 @@ Versions must be strictly increasing:
 
 ### Wildcard Resolution Flow
 
-1. DNS-encoded name received (e.g., `\x031:2\x06myapp\x03eth\x00`)
-2. Extract first label as version query (`1:2`)
+1. DNS-encoded name received (e.g., `\x031-2\x06myapp\x03eth\x00`)
+2. Extract first label as version query (`1-2`)
 3. Parse version using `parseVersionFromLabel()` → `1.2.0`
 4. Binary search for highest matching version (`1.2.x`)
 5. Return corresponding content hash
@@ -287,7 +287,7 @@ lib.mypackage.eth              # Latest stable
 
 ```
 docs.myproject.eth             # Latest documentation
-1:2.docs.myproject.eth         # v1.2.x specific docs
+1-2.docs.myproject.eth         # v1.2.x specific docs
 ```
 
 ## Dependencies

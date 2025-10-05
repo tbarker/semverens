@@ -352,7 +352,7 @@ contract SemverResolverTest is Test {
         resolver.publishContent(TEST_NODE, 1, 0, 0, CONTENT_HASH_1);
 
         // Try to resolve a version number that overflows uint8 for minor
-        bytes memory name = encodeDnsName("1:256", "test.eth"); // Max uint8 is 255
+        bytes memory name = encodeDnsName("1-256", "test.eth"); // Max uint8 is 255
         bytes memory data = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
 
         vm.expectRevert(SemverLib.InvalidVersion.selector);
@@ -365,7 +365,7 @@ contract SemverResolverTest is Test {
         resolver.publishContent(TEST_NODE, 1, 2, 0, CONTENT_HASH_1);
 
         // Try to resolve a version number that overflows uint16 for patch
-        bytes memory name = encodeDnsName("1:2:65536", "test.eth"); // Max uint16 is 65535
+        bytes memory name = encodeDnsName("1-2-65536", "test.eth"); // Max uint16 is 65535
         bytes memory data = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
 
         vm.expectRevert(SemverLib.InvalidVersion.selector);
@@ -404,13 +404,13 @@ contract SemverResolverTest is Test {
         assertEq(hash1, encodeIpfsContenthash(CONTENT_HASH_3));
 
         // Test major.minor query (255:255 → finds 255.255.65535 as highest 255.255.x)
-        bytes memory result2 = resolver.resolve(encodeDnsName("255:255", "test.eth"), selector);
+        bytes memory result2 = resolver.resolve(encodeDnsName("255-255", "test.eth"), selector);
         bytes memory hash2 = abi.decode(result2, (bytes));
         assertGt(hash2.length, 0, "Should return contenthash");
         assertEq(hash2, encodeIpfsContenthash(CONTENT_HASH_3));
 
         // Test exact query (255:255:65535 → finds exact match)
-        bytes memory result3 = resolver.resolve(encodeDnsName("255:255:65535", "test.eth"), selector);
+        bytes memory result3 = resolver.resolve(encodeDnsName("255-255-65535", "test.eth"), selector);
         bytes memory hash3 = abi.decode(result3, (bytes));
         assertGt(hash3.length, 0, "Should return contenthash");
         assertEq(hash3, encodeIpfsContenthash(CONTENT_HASH_3));
@@ -428,11 +428,11 @@ contract SemverResolverTest is Test {
 
         // Test trailing colon (empty component after colon)
         vm.expectRevert(SemverLib.InvalidVersion.selector);
-        resolver.resolve(encodeDnsName("1:", "test.eth"), selector);
+        resolver.resolve(encodeDnsName("1-", "test.eth"), selector);
 
         // Test double colon (empty component)
         vm.expectRevert(SemverLib.InvalidVersion.selector);
-        resolver.resolve(encodeDnsName("1::", "test.eth"), selector);
+        resolver.resolve(encodeDnsName("1--", "test.eth"), selector);
 
         // Test non-digit label
         vm.expectRevert(SemverLib.InvalidVersion.selector);
@@ -449,13 +449,13 @@ contract SemverResolverTest is Test {
         bytes memory selector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
 
         // Test exact match at max boundary
-        bytes memory result1 = resolver.resolve(encodeDnsName("255:255:65535", "test.eth"), selector);
+        bytes memory result1 = resolver.resolve(encodeDnsName("255-255-65535", "test.eth"), selector);
         bytes memory hash1 = abi.decode(result1, (bytes));
         assertGt(hash1.length, 0, "Should return contenthash");
         assertEq(hash1, encodeIpfsContenthash(CONTENT_HASH_2));
 
         // Test one below max
-        bytes memory result2 = resolver.resolve(encodeDnsName("254:254:65534", "test.eth"), selector);
+        bytes memory result2 = resolver.resolve(encodeDnsName("254-254-65534", "test.eth"), selector);
         bytes memory hash2 = abi.decode(result2, (bytes));
         assertGt(hash2.length, 0, "Should return contenthash");
         assertEq(hash2, encodeIpfsContenthash(CONTENT_HASH_1));
@@ -487,43 +487,43 @@ contract SemverResolverTest is Test {
         assertEq(hash2, encodeIpfsContenthash(keccak256("2.2.0")), "Query '2' should resolve to highest 2.x.x (2.2.0)");
 
         // Query "2:0" (major.minor, hasMinor=true, hasPatch=false) - should get highest 2.0.x
-        bytes memory result20 = resolver.resolve(encodeDnsName("2:0", "test.eth"), selector);
+        bytes memory result20 = resolver.resolve(encodeDnsName("2-0", "test.eth"), selector);
         bytes memory hash20 = abi.decode(result20, (bytes));
         assertGt(hash20.length, 0, "Should return contenthash");
         assertEq(
-            hash20, encodeIpfsContenthash(keccak256("2.0.5")), "Query '2:0' should resolve to highest 2.0.x (2.0.5)"
+            hash20, encodeIpfsContenthash(keccak256("2.0.5")), "Query '2-0' should resolve to highest 2.0.x (2.0.5)"
         );
 
         // Query "2:1" (major.minor) - should get highest 2.1.x
-        bytes memory result21 = resolver.resolve(encodeDnsName("2:1", "test.eth"), selector);
+        bytes memory result21 = resolver.resolve(encodeDnsName("2-1", "test.eth"), selector);
         bytes memory hash21 = abi.decode(result21, (bytes));
         assertGt(hash21.length, 0, "Should return contenthash");
         assertEq(
-            hash21, encodeIpfsContenthash(keccak256("2.1.3")), "Query '2:1' should resolve to highest 2.1.x (2.1.3)"
+            hash21, encodeIpfsContenthash(keccak256("2.1.3")), "Query '2-1' should resolve to highest 2.1.x (2.1.3)"
         );
 
         // Query "2:0:0" (exact, hasMinor=true, hasPatch=true) - should get exact 2.0.0
-        bytes memory result200 = resolver.resolve(encodeDnsName("2:0:0", "test.eth"), selector);
+        bytes memory result200 = resolver.resolve(encodeDnsName("2-0-0", "test.eth"), selector);
         bytes memory hash200 = abi.decode(result200, (bytes));
         assertGt(hash200.length, 0, "Should return contenthash");
         assertEq(
-            hash200, encodeIpfsContenthash(keccak256("2.0.0")), "Query '2:0:0' should resolve to exact version 2.0.0"
+            hash200, encodeIpfsContenthash(keccak256("2.0.0")), "Query '2-0-0' should resolve to exact version 2.0.0"
         );
 
         // Query "2:0:1" (exact) - should get exact 2.0.1
-        bytes memory result201 = resolver.resolve(encodeDnsName("2:0:1", "test.eth"), selector);
+        bytes memory result201 = resolver.resolve(encodeDnsName("2-0-1", "test.eth"), selector);
         bytes memory hash201 = abi.decode(result201, (bytes));
         assertGt(hash201.length, 0, "Should return contenthash");
         assertEq(
-            hash201, encodeIpfsContenthash(keccak256("2.0.1")), "Query '2:0:1' should resolve to exact version 2.0.1"
+            hash201, encodeIpfsContenthash(keccak256("2.0.1")), "Query '2-0-1' should resolve to exact version 2.0.1"
         );
 
         // Query "2:1:0" (exact) - should get exact 2.1.0
-        bytes memory result210 = resolver.resolve(encodeDnsName("2:1:0", "test.eth"), selector);
+        bytes memory result210 = resolver.resolve(encodeDnsName("2-1-0", "test.eth"), selector);
         bytes memory hash210 = abi.decode(result210, (bytes));
         assertGt(hash210.length, 0, "Should return contenthash");
         assertEq(
-            hash210, encodeIpfsContenthash(keccak256("2.1.0")), "Query '2:1:0' should resolve to exact version 2.1.0"
+            hash210, encodeIpfsContenthash(keccak256("2.1.0")), "Query '2-1-0' should resolve to exact version 2.1.0"
         );
 
         // Verify text resolution also works correctly
@@ -533,13 +533,13 @@ contract SemverResolverTest is Test {
         string memory text2 = abi.decode(textResult2, (string));
         assertEq(text2, "2.2.0", "Text for '2' should be 2.2.0");
 
-        bytes memory textResult20 = resolver.resolve(encodeDnsName("2:0", "test.eth"), textSelector);
+        bytes memory textResult20 = resolver.resolve(encodeDnsName("2-0", "test.eth"), textSelector);
         string memory text20 = abi.decode(textResult20, (string));
-        assertEq(text20, "2.0.5", "Text for '2:0' should be 2.0.5");
+        assertEq(text20, "2.0.5", "Text for '2-0' should be 2.0.5");
 
-        bytes memory textResult200 = resolver.resolve(encodeDnsName("2:0:0", "test.eth"), textSelector);
+        bytes memory textResult200 = resolver.resolve(encodeDnsName("2-0-0", "test.eth"), textSelector);
         string memory text200 = abi.decode(textResult200, (string));
-        assertEq(text200, "2.0.0", "Text for '2:0:0' should be 2.0.0");
+        assertEq(text200, "2.0.0", "Text for '2-0-0' should be 2.0.0");
     }
 
     // === Interface Support Tests ===
@@ -569,7 +569,7 @@ contract SemverResolverTest is Test {
     // === Unsupported Resolver Profile Tests ===
 
     function testUnsupportedResolverProfile() public {
-        bytes memory name = encodeDnsName("1:0:0", "test.eth");
+        bytes memory name = encodeDnsName("1-0-0", "test.eth");
 
         // Test with an unsupported selector (e.g., addr selector)
         bytes4 unsupportedSelector = bytes4(keccak256("addr(bytes32)"));
@@ -580,7 +580,7 @@ contract SemverResolverTest is Test {
     }
 
     function testUnsupportedResolverProfileWithShortData() public {
-        bytes memory name = encodeDnsName("1:0:0", "test.eth");
+        bytes memory name = encodeDnsName("1-0-0", "test.eth");
 
         // Test with data that's too short (less than 4 bytes)
         bytes memory shortData = hex"123456";
@@ -680,7 +680,7 @@ contract SemverResolverTest is Test {
         assertEq(result.hasPatch, false);
 
         // Major:minor
-        result = semverLibWrapper.parseVersionFromLabel("1:2");
+        result = semverLibWrapper.parseVersionFromLabel("1-2");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.version.patch, 0);
@@ -688,7 +688,7 @@ contract SemverResolverTest is Test {
         assertEq(result.hasPatch, false);
 
         // Full version
-        result = semverLibWrapper.parseVersionFromLabel("1:2:3");
+        result = semverLibWrapper.parseVersionFromLabel("1-2-3");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.version.patch, 3);
@@ -701,13 +701,13 @@ contract SemverResolverTest is Test {
     function testParseVersionFromLabelEmptyAfterColon() public {
         // Test empty component after colon - covers line 97: require(pos < data.length, InvalidVersion())
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("1:");
+        semverLibWrapper.parseVersionFromLabel("1-");
     }
 
     function testParseVersionFromLabelEmptyAfterSecondColon() public {
         // Test empty component after second colon - covers line 108: require(pos < data.length, InvalidVersion())
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("1:2:");
+        semverLibWrapper.parseVersionFromLabel("1-2-");
     }
 
     function testParseVersionFromLabelInvalidCharacters() public view {
@@ -725,7 +725,7 @@ contract SemverResolverTest is Test {
         assertEq(result.hasPatch, false);
 
         // "1:2b" parses "1" then "2" then stops at "b", so it succeeds
-        result = semverLibWrapper.parseVersionFromLabel("1:2b");
+        result = semverLibWrapper.parseVersionFromLabel("1-2b");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.version.patch, 0);
@@ -733,7 +733,7 @@ contract SemverResolverTest is Test {
         assertEq(result.hasPatch, false);
 
         // "1:2:3c" parses all numbers then stops, succeeds
-        result = semverLibWrapper.parseVersionFromLabel("1:2:3c");
+        result = semverLibWrapper.parseVersionFromLabel("1-2-3c");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.version.patch, 3);
@@ -743,12 +743,13 @@ contract SemverResolverTest is Test {
 
     function testParseVersionFromLabelSpecialCharacters() public view {
         // Test various special characters
-        // These all parse the first number then stop at the special character
+        // Hyphens are valid separators, other characters stop parsing
         SemverLib.ParsedVersion memory result;
 
         result = semverLibWrapper.parseVersionFromLabel("1-2");
         assertEq(result.version.major, 1);
-        assertEq(result.hasMinor, false);
+        assertEq(result.version.minor, 2);
+        assertEq(result.hasMinor, true);
 
         result = semverLibWrapper.parseVersionFromLabel("1.2");
         assertEq(result.version.major, 1);
@@ -773,12 +774,12 @@ contract SemverResolverTest is Test {
         assertEq(result.version.major, 1);
         assertEq(result.hasMinor, false);
 
-        result = semverLibWrapper.parseVersionFromLabel("001:002");
+        result = semverLibWrapper.parseVersionFromLabel("001-002");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.hasMinor, true);
 
-        result = semverLibWrapper.parseVersionFromLabel("01:02:03");
+        result = semverLibWrapper.parseVersionFromLabel("01-02-03");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.version.patch, 3);
@@ -795,14 +796,14 @@ contract SemverResolverTest is Test {
         assertEq(result.hasMinor, false);
         assertEq(result.hasPatch, false);
 
-        result = semverLibWrapper.parseVersionFromLabel("0:0");
+        result = semverLibWrapper.parseVersionFromLabel("0-0");
         assertEq(result.version.major, 0);
         assertEq(result.version.minor, 0);
         assertEq(result.version.patch, 0);
         assertEq(result.hasMinor, true);
         assertEq(result.hasPatch, false);
 
-        result = semverLibWrapper.parseVersionFromLabel("0:0:0");
+        result = semverLibWrapper.parseVersionFromLabel("0-0-0");
         assertEq(result.version.major, 0);
         assertEq(result.version.minor, 0);
         assertEq(result.version.patch, 0);
@@ -826,31 +827,31 @@ contract SemverResolverTest is Test {
 
     function testParseVersionFromLabelOverflowBoundaryMinor() public {
         // Test minor version at uint8 boundary
-        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("1:255");
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("1-255");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 255);
 
         // Test overflow for minor version
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("1:256");
+        semverLibWrapper.parseVersionFromLabel("1-256");
 
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("1:999999");
+        semverLibWrapper.parseVersionFromLabel("1-999999");
     }
 
     function testParseVersionFromLabelOverflowBoundaryPatch() public {
         // Test patch version at uint16 boundary
-        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("1:2:65535");
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("1-2-65535");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.version.patch, 65535);
 
         // Test overflow for patch version
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("1:2:65536");
+        semverLibWrapper.parseVersionFromLabel("1-2-65536");
 
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("1:2:999999999");
+        semverLibWrapper.parseVersionFromLabel("1-2-999999999");
     }
 
     function testParseVersionFromLabelExtremeBoundaryValues() public view {
@@ -864,30 +865,30 @@ contract SemverResolverTest is Test {
         assertEq(result.version.major, 255);
 
         // Test 254 vs 255 for minor (both should work)
-        result = semverLibWrapper.parseVersionFromLabel("1:254");
+        result = semverLibWrapper.parseVersionFromLabel("1-254");
         assertEq(result.version.minor, 254);
 
-        result = semverLibWrapper.parseVersionFromLabel("1:255");
+        result = semverLibWrapper.parseVersionFromLabel("1-255");
         assertEq(result.version.minor, 255);
 
         // Test 65534 vs 65535 for patch (both should work)
-        result = semverLibWrapper.parseVersionFromLabel("1:2:65534");
+        result = semverLibWrapper.parseVersionFromLabel("1-2-65534");
         assertEq(result.version.patch, 65534);
 
-        result = semverLibWrapper.parseVersionFromLabel("1:2:65535");
+        result = semverLibWrapper.parseVersionFromLabel("1-2-65535");
         assertEq(result.version.patch, 65535);
     }
 
     function testParseVersionFromLabelNoDigitsAfterColon() public {
         // Test cases where there are no digits after parsing starts (covers line 155: require(hasDigits, InvalidVersion()))
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel(":");
+        semverLibWrapper.parseVersionFromLabel("-");
 
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("1::");
+        semverLibWrapper.parseVersionFromLabel("1--");
 
         vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
-        semverLibWrapper.parseVersionFromLabel("::1");
+        semverLibWrapper.parseVersionFromLabel("--1");
     }
 
     function testParseVersionFromLabelTrailingCharacters() public view {
@@ -899,13 +900,13 @@ contract SemverResolverTest is Test {
         assertEq(result.version.major, 1);
         assertEq(result.hasMinor, false);
 
-        result = semverLibWrapper.parseVersionFromLabel("1:2x");
+        result = semverLibWrapper.parseVersionFromLabel("1-2x");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.hasMinor, true);
         assertEq(result.hasPatch, false);
 
-        result = semverLibWrapper.parseVersionFromLabel("1:2:3x");
+        result = semverLibWrapper.parseVersionFromLabel("1-2-3x");
         assertEq(result.version.major, 1);
         assertEq(result.version.minor, 2);
         assertEq(result.version.patch, 3);

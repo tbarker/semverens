@@ -6,7 +6,7 @@ pragma solidity ^0.8.19;
 /// @dev Supports major.minor.patch format with limited size (uint8.uint8.uint16)
 abstract contract SemverLib {
     // ASCII character constants
-    bytes1 private constant COLON = 0x3A; // ':'
+    bytes1 private constant HYPHEN = 0x2D; // '-'
     bytes1 private constant NULL_TERMINATOR = 0x00;
     bytes1 private constant ASCII_ZERO = 0x30; // '0'
     bytes1 private constant ASCII_NINE = 0x39; // '9'
@@ -22,7 +22,7 @@ abstract contract SemverLib {
     }
 
     /// @notice Parsed version with metadata about which components were explicitly specified
-    /// @dev Used for wildcard resolution to distinguish "2" from "2:0" from "2:0:0"
+    /// @dev Used for wildcard resolution to distinguish "2" from "2-0" from "2-0-0"
     struct ParsedVersion {
         Version version;
         bool hasMinor; // True if minor component was explicitly specified
@@ -69,13 +69,13 @@ abstract contract SemverLib {
         return _compare(a, b) == ComparisonResult.Greater;
     }
 
-    /// @notice Parses a colon-separated version label (for DNS labels, e.g., "1:2:3")
-    /// @param label Version label in format "major", "major:minor", or "major:minor:patch"
+    /// @notice Parses a hyphen-separated version label (for DNS labels, e.g., "1-2-3")
+    /// @param label Version label in format "major", "major-minor", or "major-minor-patch"
     /// @return Parsed version struct with metadata about which components were explicitly specified
-    /// @dev Used for wildcard resolution: "1" → 1.0.0 (hasMinor=false), "1:2" → 1.2.0 (hasMinor=true, hasPatch=false)
-    /// @dev Colons used instead of dots to avoid conflicts with DNS label separators
+    /// @dev Used for wildcard resolution: "1" → 1.0.0 (hasMinor=false), "1-2" → 1.2.0 (hasMinor=true, hasPatch=false)
+    /// @dev Hyphens used instead of dots to avoid conflicts with DNS label separators
     /// @dev Input validation: While DNS validates overall label format, we still need to validate:
-    ///      - Empty components after colons (e.g., "1:" or "1:2:")
+    ///      - Empty components after hyphens (e.g., "1-" or "1-2-")
     ///      - Non-numeric characters (e.g., "abc")
     ///      - Numeric overflow beyond uint8/uint16 limits
     function _parseVersionFromLabel(string memory label) internal pure returns (ParsedVersion memory) {
@@ -90,25 +90,25 @@ abstract contract SemverLib {
         bool hasPatch = false;
 
         // Parse major version (always present)
-        (uint256 majorValue, uint256 newPos) = _parseNumberUntil(data, pos, COLON, type(uint8).max);
+        (uint256 majorValue, uint256 newPos) = _parseNumberUntil(data, pos, HYPHEN, type(uint8).max);
         major = uint8(majorValue);
         pos = newPos;
 
-        // Check if we have a colon for minor version
-        if (pos < data.length && data[pos] == COLON) {
-            pos++; // Skip the ':'
-            require(pos < data.length, InvalidVersion()); // Prevent empty components like "1:"
+        // Check if we have a hyphen for minor version
+        if (pos < data.length && data[pos] == HYPHEN) {
+            pos++; // Skip the '-'
+            require(pos < data.length, InvalidVersion()); // Prevent empty components like "1-"
             hasMinor = true;
 
             // Parse minor version
-            (uint256 minorValue, uint256 newPos2) = _parseNumberUntil(data, pos, COLON, type(uint8).max);
+            (uint256 minorValue, uint256 newPos2) = _parseNumberUntil(data, pos, HYPHEN, type(uint8).max);
             minor = uint8(minorValue);
             pos = newPos2;
 
-            // Check if we have another colon for patch version
-            if (pos < data.length && data[pos] == COLON) {
-                pos++; // Skip the ':'
-                require(pos < data.length, InvalidVersion()); // Prevent empty components like "1:2:"
+            // Check if we have another hyphen for patch version
+            if (pos < data.length && data[pos] == HYPHEN) {
+                pos++; // Skip the '-'
+                require(pos < data.length, InvalidVersion()); // Prevent empty components like "1-2-"
                 hasPatch = true;
 
                 // Parse patch version (rest of string, delimiter NULL_TERMINATOR = parse until end)
