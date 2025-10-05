@@ -77,8 +77,7 @@ EXAMPLES:
 `);
 }
 
-// Mainnet ENS Registry address
-const ENS_REGISTRY_ADDRESS = '0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e';
+// Note: ENS Registry address is read from environment variable ENS_REGISTRY
 
 /**
  * Converts an ENS name to a namehash
@@ -137,18 +136,23 @@ function loadContractABI() {
 }
 
 /**
- * Checks if a specific version already exists in the contract
+ * Checks if a specific version already exists by attempting a dry-run
+ * Since getExactVersion is internal, we'll try to estimate gas for the transaction
+ * and catch the specific "VersionNotGreater" error
  */
-async function checkVersionExists(contract, targetNamehash, major, minor, patch) {
+async function checkVersionExists(contract, targetNamehash, major, minor, patch, contentHash) {
   try {
-    // Call getExactVersion to check if the version exists
-    // This is a view function that returns VersionRecord(version, contentHash)
-    // If contentHash is bytes32(0), the version doesn't exist
-    const result = await contract.getExactVersion(targetNamehash, major, minor, patch);
-    return result.contentHash !== '0x0000000000000000000000000000000000000000000000000000000000000000';
+    // Try to estimate gas for the publishContent transaction
+    // If the version already exists, this should fail with VersionNotGreater
+    await contract.publishContent.estimateGas(targetNamehash, major, minor, patch, contentHash);
+    return false; // If no error, version doesn't exist
   } catch (error) {
-    // If the function call fails, assume the version doesn't exist
-    console.warn(`  ⚠️  Could not check version ${major}.${minor}.${patch}: ${error.message}`);
+    // Check if the error is "VersionNotGreater" which means version already exists
+    // The error data for VersionNotGreater would be 0x9397b3c0
+    if (error.data && (error.data.includes('9397b3c0') || error.message.includes('VersionNotGreater'))) {
+      return true; // Version already exists
+    }
+    // For other errors (like authorization), assume version doesn't exist
     return false;
   }
 }
@@ -387,8 +391,8 @@ async function main() {
 
     console.log(`[${i + 1}/${versions.length}] Checking version ${versionStr}...`);
 
-    // Check if version already exists
-    const exists = await checkVersionExists(contract, targetNamehash, v.major, v.minor, v.patch);
+    // Check if version already exists by attempting a dry-run
+    const exists = await checkVersionExists(contract, targetNamehash, v.major, v.minor, v.patch, v.bytes32);
     
     if (exists) {
       console.log(`  ⏭️  Already published - skipping`);
