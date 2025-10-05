@@ -74,10 +74,13 @@ abstract contract SemverLib {
     /// @return Parsed version struct with metadata about which components were explicitly specified
     /// @dev Used for wildcard resolution: "1" → 1.0.0 (hasMinor=false), "1:2" → 1.2.0 (hasMinor=true, hasPatch=false)
     /// @dev Colons used instead of dots to avoid conflicts with DNS label separators
+    /// @dev Input validation: While DNS validates overall label format, we still need to validate:
+    ///      - Empty components after colons (e.g., "1:" or "1:2:")
+    ///      - Non-numeric characters (e.g., "abc")
+    ///      - Numeric overflow beyond uint8/uint16 limits
     function _parseVersionFromLabel(string memory label) internal pure returns (ParsedVersion memory) {
         bytes memory data = bytes(label);
-        // Note: Empty labels are prevented by upstream DNS validation in NameCoder.namehash()
-        // which validates DNS format before reaching this function
+        // Note: DNS validation ensures basic label format but doesn't validate version semantics
 
         uint256 pos = 0;
         uint8 major = 0;
@@ -94,7 +97,7 @@ abstract contract SemverLib {
         // Check if we have a colon for minor version
         if (pos < data.length && data[pos] == COLON) {
             pos++; // Skip the ':'
-            require(pos < data.length, InvalidVersion());
+            require(pos < data.length, InvalidVersion()); // Prevent empty components like "1:"
             hasMinor = true;
 
             // Parse minor version
@@ -105,7 +108,7 @@ abstract contract SemverLib {
             // Check if we have another colon for patch version
             if (pos < data.length && data[pos] == COLON) {
                 pos++; // Skip the ':'
-                require(pos < data.length, InvalidVersion());
+                require(pos < data.length, InvalidVersion()); // Prevent empty components like "1:2:"
                 hasPatch = true;
 
                 // Parse patch version (rest of string, delimiter NULL_TERMINATOR = parse until end)
@@ -115,8 +118,8 @@ abstract contract SemverLib {
             }
         }
 
-        // Note: Trailing characters are prevented by _parseNumberUntil validation
-        // which ensures only valid numeric sequences are parsed
+        // Note: _parseNumberUntil allows trailing non-digit characters by design (stops parsing at first non-digit)
+        // This means "1abc" parses as major=1, which is acceptable for DNS label compatibility
 
         return ParsedVersion({
             version: Version({major: major, minor: minor, patch: patch}),
@@ -141,6 +144,7 @@ abstract contract SemverLib {
                 uint256 digit = uint256(uint8(b) - uint8(ASCII_ZERO));
 
                 // Validate against max value to prevent overflow BEFORE multiplication
+                // This check is CRITICAL - without it, versions like "999999" could cause silent overflow
                 require(result <= (maxValue - digit) / DECIMAL_BASE, InvalidVersion());
 
                 result = result * DECIMAL_BASE + digit;
@@ -148,10 +152,13 @@ abstract contract SemverLib {
                 hasDigits = true;
                 pos++;
             } else {
+                // Stop parsing at first non-digit character (allows trailing chars like "1abc" → "1")
+                // This is by design for DNS label compatibility
                 break;
             }
         }
 
+        // This check is NECESSARY - prevents labels like "abc" or ":" from being accepted
         require(hasDigits, InvalidVersion());
 
         return (result, pos);

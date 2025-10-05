@@ -19,6 +19,26 @@ contract SemverLibWrapper is SemverLib {
     function parseVersionFromLabel(string memory label) external pure returns (ParsedVersion memory) {
         return _parseVersionFromLabel(label);
     }
+
+    /// @notice Exposes the internal _createVersion function for testing
+    function createVersion(uint8 major, uint8 minor, uint16 patch) external pure returns (Version memory) {
+        return _createVersion(major, minor, patch);
+    }
+
+    /// @notice Exposes the internal _versionToString function for testing
+    function versionToString(Version memory version) external pure returns (string memory) {
+        return _versionToString(version);
+    }
+
+    /// @notice Exposes the internal _compare function for testing
+    function compare(Version memory a, Version memory b) external pure returns (ComparisonResult) {
+        return _compare(a, b);
+    }
+
+    /// @notice Exposes the internal _isGreater function for testing
+    function isGreater(Version memory a, Version memory b) external pure returns (bool) {
+        return _isGreater(a, b);
+    }
 }
 
 contract SemverResolverTest is Test {
@@ -388,6 +408,29 @@ contract SemverResolverTest is Test {
         assertEq(BytesUtils.readBytes32(hash3, 0), CONTENT_HASH_3);
     }
 
+    function testVersionParsingMalformedLabelsStillRevert() public {
+        // Publish a version first
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 1, 0, 0, CONTENT_HASH_1);
+
+        bytes memory selector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
+
+        // These should still revert because _parseVersionFromLabel will reject them
+        // even though DNS validation passed
+
+        // Test trailing colon (empty component after colon)
+        vm.expectRevert(SemverLib.InvalidVersion.selector);
+        resolver.resolve(encodeDnsName("1:", "test.eth"), selector);
+
+        // Test double colon (empty component)
+        vm.expectRevert(SemverLib.InvalidVersion.selector);
+        resolver.resolve(encodeDnsName("1::", "test.eth"), selector);
+
+        // Test non-digit label
+        vm.expectRevert(SemverLib.InvalidVersion.selector);
+        resolver.resolve(encodeDnsName("abc", "test.eth"), selector);
+    }
+
     function testVersionParsingBoundaryValues() public {
         // Test boundary values through resolve interface
         vm.prank(owner);
@@ -650,5 +693,468 @@ contract SemverResolverTest is Test {
         assertEq(result.version.patch, 3);
         assertEq(result.hasMinor, true);
         assertEq(result.hasPatch, true);
+    }
+
+    // === Additional SemverLib Edge Case Tests ===
+
+    function testParseVersionFromLabelEmptyAfterColon() public {
+        // Test empty component after colon - covers line 97: require(pos < data.length, InvalidVersion())
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("1:");
+    }
+
+    function testParseVersionFromLabelEmptyAfterSecondColon() public {
+        // Test empty component after second colon - covers line 108: require(pos < data.length, InvalidVersion())
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("1:2:");
+    }
+
+    function testParseVersionFromLabelInvalidCharacters() public view {
+        // Test invalid characters in major component
+        // Note: _parseNumberUntil stops at first non-digit character (line 151: break)
+        // So "a" has no digits → hasDigits=false → requires InvalidVersion
+        SemverLib.ParsedVersion memory result;
+
+        // "1a" parses "1" then stops at "a", so it succeeds with major=1
+        result = semverLibWrapper.parseVersionFromLabel("1a");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 0);
+        assertEq(result.version.patch, 0);
+        assertEq(result.hasMinor, false);
+        assertEq(result.hasPatch, false);
+
+        // "1:2b" parses "1" then "2" then stops at "b", so it succeeds
+        result = semverLibWrapper.parseVersionFromLabel("1:2b");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 2);
+        assertEq(result.version.patch, 0);
+        assertEq(result.hasMinor, true);
+        assertEq(result.hasPatch, false);
+
+        // "1:2:3c" parses all numbers then stops, succeeds
+        result = semverLibWrapper.parseVersionFromLabel("1:2:3c");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 2);
+        assertEq(result.version.patch, 3);
+        assertEq(result.hasMinor, true);
+        assertEq(result.hasPatch, true);
+    }
+
+    function testParseVersionFromLabelSpecialCharacters() public view {
+        // Test various special characters
+        // These all parse the first number then stop at the special character
+        SemverLib.ParsedVersion memory result;
+
+        result = semverLibWrapper.parseVersionFromLabel("1-2");
+        assertEq(result.version.major, 1);
+        assertEq(result.hasMinor, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("1.2");
+        assertEq(result.version.major, 1);
+        assertEq(result.hasMinor, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("1_2");
+        assertEq(result.version.major, 1);
+        assertEq(result.hasMinor, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("1+2");
+        assertEq(result.version.major, 1);
+        assertEq(result.hasMinor, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("1 2");
+        assertEq(result.version.major, 1);
+        assertEq(result.hasMinor, false);
+    }
+
+    function testParseVersionFromLabelLeadingZeros() public view {
+        // Test leading zeros - should be parsed correctly
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("01");
+        assertEq(result.version.major, 1);
+        assertEq(result.hasMinor, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("001:002");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 2);
+        assertEq(result.hasMinor, true);
+
+        result = semverLibWrapper.parseVersionFromLabel("01:02:03");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 2);
+        assertEq(result.version.patch, 3);
+        assertEq(result.hasMinor, true);
+        assertEq(result.hasPatch, true);
+    }
+
+    function testParseVersionFromLabelZeroValues() public view {
+        // Test zero values
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("0");
+        assertEq(result.version.major, 0);
+        assertEq(result.version.minor, 0);
+        assertEq(result.version.patch, 0);
+        assertEq(result.hasMinor, false);
+        assertEq(result.hasPatch, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("0:0");
+        assertEq(result.version.major, 0);
+        assertEq(result.version.minor, 0);
+        assertEq(result.version.patch, 0);
+        assertEq(result.hasMinor, true);
+        assertEq(result.hasPatch, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("0:0:0");
+        assertEq(result.version.major, 0);
+        assertEq(result.version.minor, 0);
+        assertEq(result.version.patch, 0);
+        assertEq(result.hasMinor, true);
+        assertEq(result.hasPatch, true);
+    }
+
+    function testParseVersionFromLabelOverflowBoundaryMajor() public {
+        // Test major version at uint8 boundary (255 should work, 256 should fail)
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("255");
+        assertEq(result.version.major, 255);
+
+        // Test overflow for major version
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("256");
+
+        // Test much larger overflow
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("999999");
+    }
+
+    function testParseVersionFromLabelOverflowBoundaryMinor() public {
+        // Test minor version at uint8 boundary
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("1:255");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 255);
+
+        // Test overflow for minor version
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("1:256");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("1:999999");
+    }
+
+    function testParseVersionFromLabelOverflowBoundaryPatch() public {
+        // Test patch version at uint16 boundary
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("1:2:65535");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 2);
+        assertEq(result.version.patch, 65535);
+
+        // Test overflow for patch version
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("1:2:65536");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("1:2:999999999");
+    }
+
+    function testParseVersionFromLabelExtremeBoundaryValues() public {
+        // Test values at exact overflow boundaries to ensure proper validation
+
+        // Test 254 vs 255 for major (both should work)
+        SemverLib.ParsedVersion memory result = semverLibWrapper.parseVersionFromLabel("254");
+        assertEq(result.version.major, 254);
+
+        result = semverLibWrapper.parseVersionFromLabel("255");
+        assertEq(result.version.major, 255);
+
+        // Test 254 vs 255 for minor (both should work)
+        result = semverLibWrapper.parseVersionFromLabel("1:254");
+        assertEq(result.version.minor, 254);
+
+        result = semverLibWrapper.parseVersionFromLabel("1:255");
+        assertEq(result.version.minor, 255);
+
+        // Test 65534 vs 65535 for patch (both should work)
+        result = semverLibWrapper.parseVersionFromLabel("1:2:65534");
+        assertEq(result.version.patch, 65534);
+
+        result = semverLibWrapper.parseVersionFromLabel("1:2:65535");
+        assertEq(result.version.patch, 65535);
+    }
+
+    function testParseVersionFromLabelNoDigitsAfterColon() public {
+        // Test cases where there are no digits after parsing starts (covers line 155: require(hasDigits, InvalidVersion()))
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel(":");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("1::");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("::1");
+    }
+
+    function testParseVersionFromLabelTrailingCharacters() public view {
+        // Test trailing non-digit characters that cause parsing to stop
+        // These succeed because at least some digits were parsed
+        SemverLib.ParsedVersion memory result;
+
+        result = semverLibWrapper.parseVersionFromLabel("1x");
+        assertEq(result.version.major, 1);
+        assertEq(result.hasMinor, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("1:2x");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 2);
+        assertEq(result.hasMinor, true);
+        assertEq(result.hasPatch, false);
+
+        result = semverLibWrapper.parseVersionFromLabel("1:2:3x");
+        assertEq(result.version.major, 1);
+        assertEq(result.version.minor, 2);
+        assertEq(result.version.patch, 3);
+        assertEq(result.hasMinor, true);
+        assertEq(result.hasPatch, true);
+
+        result = semverLibWrapper.parseVersionFromLabel("123abc");
+        assertEq(result.version.major, 123);
+        assertEq(result.hasMinor, false);
+    }
+
+    function testParseVersionFromLabelTrueInvalidCases() public {
+        // Test cases that actually trigger InvalidVersion errors
+
+        // Pure non-digit characters (no digits parsed)
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("a");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("abc");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("xyz");
+
+        // Starting with non-digit characters
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("x1");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("-1");
+
+        // Only special characters
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("---");
+
+        vm.expectRevert(abi.encodeWithSelector(SemverLib.InvalidVersion.selector));
+        semverLibWrapper.parseVersionFromLabel("...");
+    }
+
+    // === SemverLib Core Function Tests ===
+
+    function testCreateVersion() public view {
+        // Test _createVersion function with various inputs
+        SemverLib.Version memory version = semverLibWrapper.createVersion(1, 2, 3);
+        assertEq(version.major, 1);
+        assertEq(version.minor, 2);
+        assertEq(version.patch, 3);
+
+        // Test with zero values
+        version = semverLibWrapper.createVersion(0, 0, 0);
+        assertEq(version.major, 0);
+        assertEq(version.minor, 0);
+        assertEq(version.patch, 0);
+
+        // Test with max values
+        version = semverLibWrapper.createVersion(255, 255, 65535);
+        assertEq(version.major, 255);
+        assertEq(version.minor, 255);
+        assertEq(version.patch, 65535);
+    }
+
+    function testVersionToString() public view {
+        // Test _versionToString function with various inputs
+        SemverLib.Version memory version = semverLibWrapper.createVersion(1, 2, 3);
+        string memory result = semverLibWrapper.versionToString(version);
+        assertEq(result, "1.2.3");
+
+        // Test with zero values
+        version = semverLibWrapper.createVersion(0, 0, 0);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "0.0.0");
+
+        // Test with single digit variations
+        version = semverLibWrapper.createVersion(1, 0, 0);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "1.0.0");
+
+        version = semverLibWrapper.createVersion(0, 1, 0);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "0.1.0");
+
+        version = semverLibWrapper.createVersion(0, 0, 1);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "0.0.1");
+
+        // Test with max values
+        version = semverLibWrapper.createVersion(255, 255, 65535);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "255.255.65535");
+
+        // Test with multi-digit numbers
+        version = semverLibWrapper.createVersion(12, 34, 567);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "12.34.567");
+    }
+
+    function testCompareVersions() public view {
+        // Test _compare function with all possible comparison results
+
+        // Test equal versions
+        SemverLib.Version memory v1 = semverLibWrapper.createVersion(1, 2, 3);
+        SemverLib.Version memory v2 = semverLibWrapper.createVersion(1, 2, 3);
+        SemverLib.ComparisonResult result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Equal));
+
+        // Test major version differences
+        v1 = semverLibWrapper.createVersion(1, 2, 3);
+        v2 = semverLibWrapper.createVersion(2, 1, 1);
+        result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Less));
+
+        v1 = semverLibWrapper.createVersion(2, 1, 1);
+        v2 = semverLibWrapper.createVersion(1, 2, 3);
+        result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Greater));
+
+        // Test minor version differences (when major is equal)
+        v1 = semverLibWrapper.createVersion(1, 1, 3);
+        v2 = semverLibWrapper.createVersion(1, 2, 1);
+        result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Less));
+
+        v1 = semverLibWrapper.createVersion(1, 2, 1);
+        v2 = semverLibWrapper.createVersion(1, 1, 3);
+        result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Greater));
+
+        // Test patch version differences (when major and minor are equal)
+        v1 = semverLibWrapper.createVersion(1, 2, 1);
+        v2 = semverLibWrapper.createVersion(1, 2, 2);
+        result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Less));
+
+        v1 = semverLibWrapper.createVersion(1, 2, 2);
+        v2 = semverLibWrapper.createVersion(1, 2, 1);
+        result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Greater));
+    }
+
+    function testIsGreater() public view {
+        // Test _isGreater function
+        SemverLib.Version memory v1 = semverLibWrapper.createVersion(2, 0, 0);
+        SemverLib.Version memory v2 = semverLibWrapper.createVersion(1, 9, 9);
+        assertTrue(semverLibWrapper.isGreater(v1, v2));
+        assertFalse(semverLibWrapper.isGreater(v2, v1));
+
+        // Test equal versions
+        v1 = semverLibWrapper.createVersion(1, 2, 3);
+        v2 = semverLibWrapper.createVersion(1, 2, 3);
+        assertFalse(semverLibWrapper.isGreater(v1, v2));
+        assertFalse(semverLibWrapper.isGreater(v2, v1));
+
+        // Test minor version greater
+        v1 = semverLibWrapper.createVersion(1, 3, 0);
+        v2 = semverLibWrapper.createVersion(1, 2, 9);
+        assertTrue(semverLibWrapper.isGreater(v1, v2));
+        assertFalse(semverLibWrapper.isGreater(v2, v1));
+
+        // Test patch version greater
+        v1 = semverLibWrapper.createVersion(1, 2, 4);
+        v2 = semverLibWrapper.createVersion(1, 2, 3);
+        assertTrue(semverLibWrapper.isGreater(v1, v2));
+        assertFalse(semverLibWrapper.isGreater(v2, v1));
+
+        // Test with zero versions
+        v1 = semverLibWrapper.createVersion(0, 0, 1);
+        v2 = semverLibWrapper.createVersion(0, 0, 0);
+        assertTrue(semverLibWrapper.isGreater(v1, v2));
+        assertFalse(semverLibWrapper.isGreater(v2, v1));
+    }
+
+    function testCompareVersionsEdgeCases() public view {
+        // Test edge cases for version comparison
+
+        // Test zero vs non-zero
+        SemverLib.Version memory zero = semverLibWrapper.createVersion(0, 0, 0);
+        SemverLib.Version memory nonZero = semverLibWrapper.createVersion(0, 0, 1);
+        SemverLib.ComparisonResult result = semverLibWrapper.compare(zero, nonZero);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Less));
+
+        // Test max values comparison
+        SemverLib.Version memory max1 = semverLibWrapper.createVersion(255, 255, 65535);
+        SemverLib.Version memory max2 = semverLibWrapper.createVersion(255, 255, 65534);
+        result = semverLibWrapper.compare(max1, max2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Greater));
+
+        // Test boundary conditions
+        SemverLib.Version memory v1 = semverLibWrapper.createVersion(1, 0, 0);
+        SemverLib.Version memory v2 = semverLibWrapper.createVersion(0, 255, 65535);
+        result = semverLibWrapper.compare(v1, v2);
+        assertEq(uint256(result), uint256(SemverLib.ComparisonResult.Greater));
+    }
+
+    function testVersionToStringUintConversion() public view {
+        // Test _uintToString function indirectly through _versionToString with edge cases
+
+        // Test various number sizes to ensure _uintToString works correctly
+        SemverLib.Version memory version;
+        string memory result;
+
+        // Single digit numbers
+        for (uint8 i = 0; i <= 9; i++) {
+            version = semverLibWrapper.createVersion(i, i, i);
+            result = semverLibWrapper.versionToString(version);
+            // Verify the format is correct for single digits
+            assertEq(bytes(result).length, 5); // "X.X.X" = 5 characters
+        }
+
+        // Two digit numbers
+        version = semverLibWrapper.createVersion(10, 11, 12);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "10.11.12");
+
+        // Three digit numbers
+        version = semverLibWrapper.createVersion(100, 200, 300);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "100.200.300");
+
+        // Max values for each component type
+        version = semverLibWrapper.createVersion(255, 255, 65535);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "255.255.65535");
+
+        // Test specific boundary values
+        version = semverLibWrapper.createVersion(99, 99, 9999);
+        result = semverLibWrapper.versionToString(version);
+        assertEq(result, "99.99.9999");
+    }
+
+    function testVersionFunctionInteractions() public view {
+        // Test interactions between different SemverLib functions
+
+        // Create version -> convert to string -> verify consistency
+        SemverLib.Version memory original = semverLibWrapper.createVersion(42, 13, 1337);
+        string memory versionString = semverLibWrapper.versionToString(original);
+        assertEq(versionString, "42.13.1337");
+
+        // Test version comparison consistency
+        SemverLib.Version memory lower = semverLibWrapper.createVersion(1, 0, 0);
+        SemverLib.Version memory higher = semverLibWrapper.createVersion(1, 0, 1);
+
+        assertTrue(semverLibWrapper.isGreater(higher, lower));
+        assertFalse(semverLibWrapper.isGreater(lower, higher));
+        assertEq(uint256(semverLibWrapper.compare(lower, higher)), uint256(SemverLib.ComparisonResult.Less));
+        assertEq(uint256(semverLibWrapper.compare(higher, lower)), uint256(SemverLib.ComparisonResult.Greater));
+
+        // Test version equality
+        SemverLib.Version memory copy = semverLibWrapper.createVersion(42, 13, 1337);
+        assertEq(uint256(semverLibWrapper.compare(original, copy)), uint256(SemverLib.ComparisonResult.Equal));
+        assertFalse(semverLibWrapper.isGreater(original, copy));
+        assertFalse(semverLibWrapper.isGreater(copy, original));
     }
 }
