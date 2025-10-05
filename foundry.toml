@@ -1,0 +1,21 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+
+[lint]
+exclude_lints = ["asm-keccak256"]
+
+# SMT solver configuration
+# Note: This takes over 10 hours without completing on my laptop!
+# Uncomment to enable (requires z3 installed and may be slow):
+#[profile.default.model_checker]
+#engine = "all"
+#timeout = 120000
+#contracts = { "src/SemverResolver.sol" = ["SemverResolver"] }
+
+# Etherscan API configuration for contract verification
+[etherscan]
+mainnet = { key = "${ETHERSCAN_API_KEY}" }
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
