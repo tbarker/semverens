@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+// Using IERC165 from forge-std to avoid OpenZeppelin version conflicts
+import {IERC165} from "forge-std/interfaces/IERC165.sol";
 import {ENS} from "ens-contracts/registry/ENS.sol";
 import {IExtendedResolver} from "ens-contracts/resolvers/profiles/IExtendedResolver.sol";
 import {IContentHashResolver} from "ens-contracts/resolvers/profiles/IContentHashResolver.sol";
 import {ITextResolver} from "ens-contracts/resolvers/profiles/ITextResolver.sol";
+import {INameWrapper} from "ens-contracts/wrapper/INameWrapper.sol";
 import {NameCoder} from "ens-contracts/utils/NameCoder.sol";
 import {BytesUtils} from "ens-contracts/utils/BytesUtils.sol";
 import {VersionRegistry} from "./VersionRegistry.sol";
@@ -22,6 +24,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     bytes32 private constant VERSION_KEY_HASH = keccak256("version");
 
     ENS public immutable ENS_REGISTRY;
+    INameWrapper public immutable NAME_WRAPPER;
 
     // Standard ENS errors (same signatures as defined in ENS ecosystem)
     // These match the errors defined in:
@@ -30,10 +33,40 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     error Unauthorised(bytes32 node, address addr);
     error UnsupportedResolverProfile(bytes4 selector);
 
-    /// @dev Restricts access to ENS name owner or approved operators
-    modifier authorised(bytes32 node) {
+    /// @dev Gets the actual owner of an ENS name, handling wrapped names
+    /// @param node The namehash of the ENS name
+    /// @return The actual owner address (unwrapped if necessary)
+    function _getActualOwner(bytes32 node) internal view returns (address) {
         address owner = ENS_REGISTRY.owner(node);
-        if (owner != msg.sender && !ENS_REGISTRY.isApprovedForAll(owner, msg.sender)) {
+
+        // If the owner is the NameWrapper contract, get the actual owner from the wrapper
+        if (owner == address(NAME_WRAPPER)) {
+            try NAME_WRAPPER.ownerOf(uint256(node)) returns (address actualOwner) {
+                return actualOwner;
+            } catch {
+                // If the call fails, fall back to the registry owner
+                return owner;
+            }
+        }
+
+        return owner;
+    }
+
+    /// @dev Checks if the caller is authorized for the given node
+    /// @param node The namehash of the ENS name
+    /// @param caller The address to check authorization for
+    /// @return True if authorized, false otherwise
+    function _isAuthorised(bytes32 node, address caller) internal view returns (bool) {
+        address actualOwner = _getActualOwner(node);
+
+        // Check if caller is the owner or approved by the owner
+        return caller == actualOwner || ENS_REGISTRY.isApprovedForAll(actualOwner, caller);
+    }
+
+    /// @dev Restricts access to ENS name owner or approved operators
+    /// @dev Now properly handles wrapped ENS names via NameWrapper contract
+    modifier authorised(bytes32 node) {
+        if (!_isAuthorised(node, msg.sender)) {
             revert Unauthorised(node, msg.sender);
         }
         _;
@@ -41,9 +74,10 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
 
     /// @notice Creates a new SemverResolver instance
     /// @param _ens The ENS registry contract address
-    /// @dev Sets the deployer as the initial owner via Ownable
-    constructor(ENS _ens) {
+    /// @param _nameWrapper The NameWrapper contract address
+    constructor(ENS _ens, INameWrapper _nameWrapper) {
         ENS_REGISTRY = _ens;
+        NAME_WRAPPER = _nameWrapper;
     }
 
     /// @notice Checks if this contract implements a given interface

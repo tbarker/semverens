@@ -122,6 +122,15 @@ forge script script/DeploySemverResolver.s.sol:DeploySemverResolver \
 - `ENS_REGISTRY` (required): ENS registry address (mainnet: `0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e`)
 - `ETHERSCAN_API_KEY` (required for verification): Your Etherscan API key
 
+## Official ENS Contract Addresses
+
+The following are the official ENS contract addresses on Ethereum mainnet (correct as of October 5th, 2025):
+
+- **ENS Registry**: `0x00000000000C2E074eC69A0dFb2997BA6C7d2e1e`
+- **ENS Name Wrapper**: `0xd4416b13d2b3a9abae7acd5d6c2bbdbe25686401`
+
+These addresses are used throughout the SemverResolver for ENS integration and can be referenced in the `.env` file as `ENS_REGISTRY` and `NAME_WRAPPER` respectively.
+
 #### Option 2: Using Trezor/Ledger Hardware Wallet
 
 For production deployments, use a hardware wallet for enhanced security:

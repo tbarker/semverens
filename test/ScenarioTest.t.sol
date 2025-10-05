@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import {Test} from "forge-std/Test.sol";
 import {SemverResolver} from "../src/SemverResolver.sol";
 import {ENS} from "ens-contracts/registry/ENS.sol";
+import {INameWrapper} from "ens-contracts/wrapper/INameWrapper.sol";
 import {ITextResolver} from "ens-contracts/resolvers/profiles/ITextResolver.sol";
 import {IContentHashResolver} from "ens-contracts/resolvers/profiles/IContentHashResolver.sol";
 import {NameCoder} from "ens-contracts/utils/NameCoder.sol";
@@ -31,7 +32,7 @@ contract ScenarioTest is Test {
         accumuloOwner = makeAddr("accumulo-owner");
         drupalOwner = makeAddr("drupal-maintainer");
         ens = new MockENSRegistry();
-        resolver = new SemverResolver(ENS(address(ens)));
+        resolver = new SemverResolver(ENS(address(ens)), INameWrapper(address(0)));
         ens.setOwner(ACCUMULO_NODE, accumuloOwner);
         ens.setOwner(DRUPAL_NODE, drupalOwner);
     }

@@ -7,6 +7,7 @@ import {SemverLib} from "../src/SemverLib.sol";
 import {NameCoder} from "ens-contracts/utils/NameCoder.sol";
 import {BytesUtils} from "ens-contracts/utils/BytesUtils.sol";
 import {ENS} from "ens-contracts/registry/ENS.sol";
+import {INameWrapper} from "ens-contracts/wrapper/INameWrapper.sol";
 import {ITextResolver} from "ens-contracts/resolvers/profiles/ITextResolver.sol";
 import {IContentHashResolver} from "ens-contracts/resolvers/profiles/IContentHashResolver.sol";
 import {IExtendedResolver} from "ens-contracts/resolvers/profiles/IExtendedResolver.sol";
@@ -41,7 +42,7 @@ contract SemverResolverTest is Test {
         user = makeAddr("user");
 
         ens = new MockENSRegistry();
-        resolver = new SemverResolver(ENS(address(ens)));
+        resolver = new SemverResolver(ENS(address(ens)), INameWrapper(address(0)));
         semverLibWrapper = new SemverLibWrapper();
 
         // Set up ownership

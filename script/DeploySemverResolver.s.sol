@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import {Script, console} from "forge-std/Script.sol";
 import {SemverResolver} from "../src/SemverResolver.sol";
 import {ENS} from "ens-contracts/registry/ENS.sol";
+import {INameWrapper} from "ens-contracts/wrapper/INameWrapper.sol";
 
 /**
  * @title DeploySemverResolver
@@ -24,12 +25,13 @@ import {ENS} from "ens-contracts/registry/ENS.sol";
 contract DeploySemverResolver is Script {
     function run() external {
         address ensRegistry = vm.envAddress("ENS_REGISTRY");
+        address nameWrapper = vm.envAddress("NAME_WRAPPER");
 
         // When using --ledger flag, forge automatically uses hardware wallet
         // Otherwise, it uses PRIVATE_KEY from environment
         vm.startBroadcast();
 
-        SemverResolver resolver = new SemverResolver(ENS(ensRegistry));
+        SemverResolver resolver = new SemverResolver(ENS(ensRegistry), INameWrapper(nameWrapper));
 
         console.log("SemverResolver deployed at:", address(resolver));
 
@@ -43,7 +45,11 @@ contract DeploySemverResolver is Script {
         MockENSRegistry mockEns = new MockENSRegistry();
         console.log("Mock ENS Registry deployed at:", address(mockEns));
 
-        SemverResolver resolver = new SemverResolver(ENS(address(mockEns)));
+        // Deploy a mock NameWrapper for local testing
+        MockNameWrapper mockWrapper = new MockNameWrapper();
+        console.log("Mock NameWrapper deployed at:", address(mockWrapper));
+
+        SemverResolver resolver = new SemverResolver(ENS(address(mockEns)), INameWrapper(address(mockWrapper)));
         console.log("SemverResolver deployed at:", address(resolver));
 
         vm.stopBroadcast();
@@ -132,5 +138,17 @@ contract MockENSRegistry is ENS {
 
     function isApprovedForAll(address _owner, address operator) external view override returns (bool) {
         return operators[_owner][operator];
+    }
+}
+
+contract MockNameWrapper {
+    mapping(uint256 => address) private _owners;
+
+    function ownerOf(uint256 id) external view returns (address) {
+        return _owners[id];
+    }
+
+    function setOwner(uint256 id, address owner) external {
+        _owners[id] = owner;
     }
 }
