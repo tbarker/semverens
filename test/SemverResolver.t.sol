@@ -1159,4 +1159,144 @@ contract SemverResolverTest is Test {
         assertFalse(semverLibWrapper.isGreater(original, copy));
         assertFalse(semverLibWrapper.isGreater(copy, original));
     }
+
+    // === Publish and Resolve Integration Tests ===
+
+    function testPublishAndResolveBasicVersion() public {
+        // Publish a version
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 1, 0, 0, CONTENT_HASH_1);
+
+        // Test contenthash resolution through resolve function
+        bytes memory contentSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
+        bytes memory result = resolver.resolve(encodeDnsName("1-0-0", "test.eth"), contentSelector);
+        bytes memory hash = abi.decode(result, (bytes));
+        assertEq(hash, encodeIpfsContenthash(CONTENT_HASH_1));
+
+        // Test version text resolution through resolve function
+        bytes memory textSelector = abi.encodeWithSelector(ITextResolver.text.selector, TEST_NODE, "version");
+        bytes memory textResult = resolver.resolve(encodeDnsName("1-0-0", "test.eth"), textSelector);
+        string memory version = abi.decode(textResult, (string));
+        assertEq(version, "1.0.0");
+    }
+
+    function testPublishAndResolveContenthashWildcard() public {
+        // Publish multiple versions
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 2, 1, 0, CONTENT_HASH_1);
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 2, 1, 5, CONTENT_HASH_2);
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 2, 2, 0, CONTENT_HASH_3);
+
+        bytes memory contentSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
+
+        // Test major-only wildcard resolution (should get highest 2.x.x)
+        bytes memory result1 = resolver.resolve(encodeDnsName("2", "test.eth"), contentSelector);
+        bytes memory hash1 = abi.decode(result1, (bytes));
+        assertEq(hash1, encodeIpfsContenthash(CONTENT_HASH_3));
+
+        // Test major.minor wildcard resolution (should get highest 2.1.x)
+        bytes memory result2 = resolver.resolve(encodeDnsName("2-1", "test.eth"), contentSelector);
+        bytes memory hash2 = abi.decode(result2, (bytes));
+        assertEq(hash2, encodeIpfsContenthash(CONTENT_HASH_2));
+
+        // Test exact version resolution
+        bytes memory result3 = resolver.resolve(encodeDnsName("2-1-0", "test.eth"), contentSelector);
+        bytes memory hash3 = abi.decode(result3, (bytes));
+        assertEq(hash3, encodeIpfsContenthash(CONTENT_HASH_1));
+    }
+
+    function testPublishAndResolveVersionTextWildcard() public {
+        // Publish multiple versions
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 3, 0, 1, CONTENT_HASH_1);
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 3, 0, 10, CONTENT_HASH_2);
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 3, 5, 0, CONTENT_HASH_3);
+
+        bytes memory textSelector = abi.encodeWithSelector(ITextResolver.text.selector, TEST_NODE, "version");
+
+        // Test major-only wildcard text resolution (should get highest 3.x.x)
+        bytes memory result1 = resolver.resolve(encodeDnsName("3", "test.eth"), textSelector);
+        string memory version1 = abi.decode(result1, (string));
+        assertEq(version1, "3.5.0");
+
+        // Test major.minor wildcard text resolution (should get highest 3.0.x)
+        bytes memory result2 = resolver.resolve(encodeDnsName("3-0", "test.eth"), textSelector);
+        string memory version2 = abi.decode(result2, (string));
+        assertEq(version2, "3.0.10");
+
+        // Test exact version text resolution
+        bytes memory result3 = resolver.resolve(encodeDnsName("3-0-1", "test.eth"), textSelector);
+        string memory version3 = abi.decode(result3, (string));
+        assertEq(version3, "3.0.1");
+    }
+
+    function testPublishMultipleVersionsAndResolveLatest() public {
+        // Publish versions in chronological order (strictly increasing requirement)
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 1, 0, 0, CONTENT_HASH_1);
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 1, 5, 0, CONTENT_HASH_2);
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 2, 0, 0, CONTENT_HASH_3);
+
+        // Test that latest version is resolved through direct calls
+        bytes memory latestHash = resolver.contenthash(TEST_NODE);
+        assertEq(latestHash, encodeIpfsContenthash(CONTENT_HASH_3));
+
+        string memory latestVersion = resolver.text(TEST_NODE, "version");
+        assertEq(latestVersion, "2.0.0");
+
+        // Test that wildcard resolution for major "1" gets highest 1.x.x version
+        bytes memory contentSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
+        bytes memory result = resolver.resolve(encodeDnsName("1", "test.eth"), contentSelector);
+        bytes memory hash = abi.decode(result, (bytes));
+        assertEq(hash, encodeIpfsContenthash(CONTENT_HASH_2));
+
+        bytes memory textSelector = abi.encodeWithSelector(ITextResolver.text.selector, TEST_NODE, "version");
+        bytes memory textResult = resolver.resolve(encodeDnsName("1", "test.eth"), textSelector);
+        string memory version = abi.decode(textResult, (string));
+        assertEq(version, "1.5.0");
+    }
+
+    function testPublishAndResolveNoMatchingVersion() public {
+        // Publish some versions
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 1, 0, 0, CONTENT_HASH_1);
+        vm.prank(owner);
+        resolver.publishContent(TEST_NODE, 2, 0, 0, CONTENT_HASH_2);
+
+        bytes memory contentSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
+        bytes memory textSelector = abi.encodeWithSelector(ITextResolver.text.selector, TEST_NODE, "version");
+
+        // Test querying for non-existent major version
+        bytes memory result1 = resolver.resolve(encodeDnsName("3", "test.eth"), contentSelector);
+        bytes memory hash1 = abi.decode(result1, (bytes));
+        assertEq(hash1.length, 0);
+
+        bytes memory textResult1 = resolver.resolve(encodeDnsName("3", "test.eth"), textSelector);
+        string memory version1 = abi.decode(textResult1, (string));
+        assertEq(version1, "");
+
+        // Test querying for non-existent minor version
+        bytes memory result2 = resolver.resolve(encodeDnsName("1-5", "test.eth"), contentSelector);
+        bytes memory hash2 = abi.decode(result2, (bytes));
+        assertEq(hash2.length, 0);
+
+        bytes memory textResult2 = resolver.resolve(encodeDnsName("1-5", "test.eth"), textSelector);
+        string memory version2 = abi.decode(textResult2, (string));
+        assertEq(version2, "");
+
+        // Test querying for non-existent exact version
+        bytes memory result3 = resolver.resolve(encodeDnsName("1-0-1", "test.eth"), contentSelector);
+        bytes memory hash3 = abi.decode(result3, (bytes));
+        assertEq(hash3.length, 0);
+
+        bytes memory textResult3 = resolver.resolve(encodeDnsName("1-0-1", "test.eth"), textSelector);
+        string memory version3 = abi.decode(textResult3, (string));
+        assertEq(version3, "");
+    }
 }
