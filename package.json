@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "forge test",
-    "coverage": "forge coverage --report lcov && genhtml lcov.info --branch-coverage --output-dir coverage",
+    "coverage": "forge coverage --no-match-coverage \"script/.*\" --report lcov && genhtml lcov.info --branch-coverage --output-dir coverage",
     "demo-cids": "node script/computeCIDs.js",
     "demo-deploy": "node script/deploy-demo.js"
   },
