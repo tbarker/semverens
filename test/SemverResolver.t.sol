@@ -393,24 +393,24 @@ contract SemverResolverTest is Test {
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 255, 255, 0, CONTENT_HASH_2);
         vm.prank(owner);
-        resolver.publishContent(TEST_NODE, 255, 255, 65535, CONTENT_HASH_3);
+        resolver.publishContent(TEST_NODE, 255, 255, 1, CONTENT_HASH_3);
 
         bytes memory selector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, TEST_NODE);
 
-        // Test major-only query (255 → finds 255.255.65535 as highest 255.x.x)
+        // Test major-only query (255 → finds 255.255.1 as highest 255.x.x)
         bytes memory result1 = resolver.resolve(encodeDnsName("255", "test.eth"), selector);
         bytes memory hash1 = abi.decode(result1, (bytes));
         assertGt(hash1.length, 0, "Should return contenthash");
         assertEq(hash1, encodeIpfsContenthash(CONTENT_HASH_3));
 
-        // Test major.minor query (255:255 → finds 255.255.65535 as highest 255.255.x)
+        // Test major.minor query (255:255 → finds 255.255.1 as highest 255.255.x)
         bytes memory result2 = resolver.resolve(encodeDnsName("255-255", "test.eth"), selector);
         bytes memory hash2 = abi.decode(result2, (bytes));
         assertGt(hash2.length, 0, "Should return contenthash");
         assertEq(hash2, encodeIpfsContenthash(CONTENT_HASH_3));
 
-        // Test exact query (255:255:65535 → finds exact match)
-        bytes memory result3 = resolver.resolve(encodeDnsName("255-255-65535", "test.eth"), selector);
+        // Test exact query (255:255:1 → finds exact match)
+        bytes memory result3 = resolver.resolve(encodeDnsName("255-255-1", "test.eth"), selector);
         bytes memory hash3 = abi.decode(result3, (bytes));
         assertGt(hash3.length, 0, "Should return contenthash");
         assertEq(hash3, encodeIpfsContenthash(CONTENT_HASH_3));
@@ -470,11 +470,11 @@ contract SemverResolverTest is Test {
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 2, 0, 1, keccak256("2.0.1"));
         vm.prank(owner);
-        resolver.publishContent(TEST_NODE, 2, 0, 5, keccak256("2.0.5"));
+        resolver.publishContent(TEST_NODE, 2, 0, 2, keccak256("2.0.2"));
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 2, 1, 0, keccak256("2.1.0"));
         vm.prank(owner);
-        resolver.publishContent(TEST_NODE, 2, 1, 3, keccak256("2.1.3"));
+        resolver.publishContent(TEST_NODE, 2, 1, 1, keccak256("2.1.1"));
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 2, 2, 0, keccak256("2.2.0"));
 
@@ -491,7 +491,7 @@ contract SemverResolverTest is Test {
         bytes memory hash20 = abi.decode(result20, (bytes));
         assertGt(hash20.length, 0, "Should return contenthash");
         assertEq(
-            hash20, encodeIpfsContenthash(keccak256("2.0.5")), "Query '2-0' should resolve to highest 2.0.x (2.0.5)"
+            hash20, encodeIpfsContenthash(keccak256("2.0.2")), "Query '2-0' should resolve to highest 2.0.x (2.0.2)"
         );
 
         // Query "2:1" (major.minor) - should get highest 2.1.x
@@ -499,7 +499,7 @@ contract SemverResolverTest is Test {
         bytes memory hash21 = abi.decode(result21, (bytes));
         assertGt(hash21.length, 0, "Should return contenthash");
         assertEq(
-            hash21, encodeIpfsContenthash(keccak256("2.1.3")), "Query '2-1' should resolve to highest 2.1.x (2.1.3)"
+            hash21, encodeIpfsContenthash(keccak256("2.1.1")), "Query '2-1' should resolve to highest 2.1.x (2.1.1)"
         );
 
         // Query "2:0:0" (exact, hasMinor=true, hasPatch=true) - should get exact 2.0.0
@@ -535,7 +535,7 @@ contract SemverResolverTest is Test {
 
         bytes memory textResult20 = resolver.resolve(encodeDnsName("2-0", "test.eth"), textSelector);
         string memory text20 = abi.decode(textResult20, (string));
-        assertEq(text20, "2.0.5", "Text for '2-0' should be 2.0.5");
+        assertEq(text20, "2.0.2", "Text for '2-0' should be 2.0.2");
 
         bytes memory textResult200 = resolver.resolve(encodeDnsName("2-0-0", "test.eth"), textSelector);
         string memory text200 = abi.decode(textResult200, (string));
@@ -1185,7 +1185,7 @@ contract SemverResolverTest is Test {
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 2, 1, 0, CONTENT_HASH_1);
         vm.prank(owner);
-        resolver.publishContent(TEST_NODE, 2, 1, 5, CONTENT_HASH_2);
+        resolver.publishContent(TEST_NODE, 2, 1, 1, CONTENT_HASH_2);
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 2, 2, 0, CONTENT_HASH_3);
 
@@ -1212,7 +1212,7 @@ contract SemverResolverTest is Test {
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 3, 0, 1, CONTENT_HASH_1);
         vm.prank(owner);
-        resolver.publishContent(TEST_NODE, 3, 0, 10, CONTENT_HASH_2);
+        resolver.publishContent(TEST_NODE, 3, 0, 2, CONTENT_HASH_2);
         vm.prank(owner);
         resolver.publishContent(TEST_NODE, 3, 5, 0, CONTENT_HASH_3);
 
@@ -1226,7 +1226,7 @@ contract SemverResolverTest is Test {
         // Test major.minor wildcard text resolution (should get highest 3.0.x)
         bytes memory result2 = resolver.resolve(encodeDnsName("3-0", "test.eth"), textSelector);
         string memory version2 = abi.decode(result2, (string));
-        assertEq(version2, "3.0.10");
+        assertEq(version2, "3.0.2");
 
         // Test exact version text resolution
         bytes memory result3 = resolver.resolve(encodeDnsName("3-0-1", "test.eth"), textSelector);

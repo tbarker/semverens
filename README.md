@@ -239,9 +239,13 @@ node script/deploy-demo.js --single-version=1.8.4
 
 ### Version Ordering
 
-Versions must be strictly increasing:
-- `1.0.0` → `1.0.1` → `1.1.0` → `2.0.0` ✅
-- `1.1.0` → `1.0.1` ❌ (reverts with `VersionNotGreater`)
+Uses **component-wise ordering** instead of strictly chronological:
+- **Major/Minor versions** can be added out of chronological order (gaps allowed)
+- **Patch versions** must be strictly sequential within each major.minor
+- Examples:
+  - `1.1.4` → `2.0.0` → `1.1.5` → `1.2.0` ✅ (component-wise)
+  - `1.1.0` → `1.1.2` ❌ (patch gap: missing 1.1.1)
+  - `1.1.4` → `1.1.3` ❌ (patch backfill not allowed)
 
 ### Binary Search Algorithm
 

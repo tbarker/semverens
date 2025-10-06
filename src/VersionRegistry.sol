@@ -5,8 +5,10 @@ import {SemverLib} from "./SemverLib.sol";
 
 /// @title VersionRegistry
 /// @notice Abstract contract for storing and querying versioned content by ENS namehash
-/// @dev Versions must be added in strictly increasing order (enforced by addVersion)
+/// @dev Uses component-wise version ordering: major/minor can be added out of order,
+///      but patch versions must be strictly sequential within each major.minor
 /// @dev Uses binary search for O(log n) version lookups
+/// @dev Example valid sequence: 1.1.4 → 2.0.0 → 1.1.5 → 1.2.0 → 2.0.1
 abstract contract VersionRegistry is SemverLib {
     /// @notice Represents a versioned content record
     /// @param version The semantic version (major.minor.patch)
@@ -20,17 +22,78 @@ abstract contract VersionRegistry is SemverLib {
     /// @dev Array is sorted to enable binary search for efficient lookups
     mapping(bytes32 => VersionRecord[]) private versionRegistry;
 
-    error VersionNotGreater();
     error ZeroVersionNotAllowed();
+    error PatchVersionNotSequential();
 
-    /// @dev Adds a new version to the registry
+    /// @dev Validates component-wise version ordering rules in a single pass
+    /// @param versions Array of existing version records (sorted)
+    /// @param newVersion The new version to validate
+    /// @notice Enforces rules:
+    ///   - Major and minor versions can be added out of chronological order (gaps allowed)
+    ///   - Patch versions must be strictly sequential within same major.minor (no gaps)
+    ///   - Example: 1.0.0 → 1.0.1 → 1.0.2 (valid), 1.0.0 → 1.0.2 (invalid)
+    function _validateComponentWiseOrder(VersionRecord[] storage versions, Version memory newVersion) private view {
+        uint16 highestPatch = 0;
+        bool foundMajorMinor = false;
+
+        // Single pass: find highest patch for this major.minor AND check for duplicates
+        for (uint256 i = 0; i < versions.length; i++) {
+            Version memory existing = versions[i].version;
+            if (existing.major == newVersion.major && existing.minor == newVersion.minor) {
+                foundMajorMinor = true;
+                // Duplicate check is implicit: if patch matches highestPatch,
+                // the sequential check below will catch it
+                if (existing.patch > highestPatch) {
+                    highestPatch = existing.patch;
+                }
+            }
+        }
+
+        // For existing major.minor: patch must be exactly highestPatch + 1
+        // For new major.minor: any patch value is allowed as the starting patch
+        if (foundMajorMinor && newVersion.patch != highestPatch + 1) {
+            revert PatchVersionNotSequential();
+        }
+    }
+
+    /// @dev Finds the insertion point for a new version using binary search
+    /// @param versions Array of existing version records (sorted)
+    /// @param newVersion The version to find insertion point for
+    /// @return The index where the new version should be inserted
+    /// @notice Inspired by OpenZeppelin Arrays.sol lowerBound implementation
+    function _findInsertionPoint(VersionRecord[] storage versions, Version memory newVersion)
+        private
+        view
+        returns (uint256)
+    {
+        uint256 low = 0;
+        uint256 high = versions.length;
+
+        while (low < high) {
+            uint256 mid = (low + high) / 2;
+
+            if (_isGreater(newVersion, versions[mid].version)) {
+                low = mid + 1;
+            } else {
+                high = mid;
+            }
+        }
+
+        return low;
+    }
+
+    /// @dev Adds a new version to the registry using component-wise ordering
     /// @param namehash The ENS namehash to add the version for
     /// @param major The major version number (0-255)
     /// @param minor The minor version number (0-255)
     /// @param patch The patch version number (0-65535)
     /// @param contentHash The content hash for this version
-    /// @notice Reverts if version is not strictly greater than the latest version
+    /// @notice Component-wise ordering rules:
+    ///   - Major and minor versions can be added out of chronological order
+    ///   - Patch versions must be strictly sequential within same major.minor
+    ///   - Cannot add duplicate versions; no patch gaps allowed
     /// @notice Reverts if version is 0.0.0 (reserved as sentinel value)
+    /// @notice Examples: 1.1.4 → 2.0.0 → 1.1.5 (valid), 1.1.4 → 1.1.3 (invalid)
     function addVersion(bytes32 namehash, uint8 major, uint8 minor, uint16 patch, bytes32 contentHash) internal {
         Version memory newVersion = _createVersion(major, minor, patch);
 
@@ -42,15 +105,21 @@ abstract contract VersionRegistry is SemverLib {
 
         VersionRecord[] storage versions = versionRegistry[namehash];
 
-        // Check if new version is greater than the latest version
-        if (versions.length > 0) {
-            Version memory latestVersion = versions[versions.length - 1].version;
-            if (!_isGreater(newVersion, latestVersion)) {
-                revert VersionNotGreater();
-            }
-        }
+        // Validate component-wise ordering rules
+        _validateComponentWiseOrder(versions, newVersion);
 
-        versions.push(VersionRecord({version: newVersion, contentHash: contentHash}));
+        // Add the new version using binary search insertion (inspired by OpenZeppelin Arrays.sol)
+        VersionRecord memory newRecord = VersionRecord({version: newVersion, contentHash: contentHash});
+
+        // Find insertion point using binary search (O(log n))
+        uint256 insertIndex = _findInsertionPoint(versions, newVersion);
+
+        // Insert at correct position
+        versions.push(newRecord);
+        for (uint256 i = versions.length - 1; i > insertIndex; i--) {
+            versions[i] = versions[i - 1];
+        }
+        versions[insertIndex] = newRecord;
     }
 
     /// @dev Gets the content hash of the latest version for a given namehash

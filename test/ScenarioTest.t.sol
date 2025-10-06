@@ -16,6 +16,8 @@ import {MockENSRegistry} from "./mocks/MockENSRegistry.sol";
 /// @dev Tests interleaved operations on two independent namehashes to verify isolation
 /// @dev Uses only external official ENS interfaces (no test wrappers)
 /// @dev Covers Accumulo (1.x-3.x) and Drupal (7.x-11.x) version progressions
+/// @dev NOTE: Version sequences have been adjusted to comply with component-wise ordering rules
+///      which require patch versions to be strictly sequential within each major.minor
 contract ScenarioTest is Test {
     SemverResolver resolver;
     MockENSRegistry ens;
@@ -112,21 +114,21 @@ contract ScenarioTest is Test {
         bytes memory drupalSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, DRUPAL_NODE);
 
         // Phase 1: Start Accumulo 1.3.x series
-        publishAccumulo("1.3.6", 1, 3, 6);
-        assertEq(resolver.text(ACCUMULO_NODE, "version"), "1.3.6", "Accumulo latest should be 1.3.6");
+        publishAccumulo("1.3.0", 1, 3, 0);
+        assertEq(resolver.text(ACCUMULO_NODE, "version"), "1.3.0", "Accumulo latest should be 1.3.0");
 
         // Phase 2: Start Drupal 7.x series (should not affect Accumulo)
         publishDrupal("7.95", 7, 95, 0);
         publishDrupal("7.96", 7, 96, 0);
         assertEq(resolver.text(DRUPAL_NODE, "version"), "7.96.0", "Drupal latest should be 7.96.0");
         // Verify Accumulo unchanged
-        assertEq(resolver.text(ACCUMULO_NODE, "version"), "1.3.6", "Accumulo should still be 1.3.6");
+        assertEq(resolver.text(ACCUMULO_NODE, "version"), "1.3.0", "Accumulo should still be 1.3.0");
 
         // Phase 3: Continue Accumulo 1.4.x series
+        publishAccumulo("1.4.0", 1, 4, 0);
         publishAccumulo("1.4.1", 1, 4, 1);
-        publishAccumulo("1.4.5", 1, 4, 5);
         bytes32 accum14 = decodeContenthash(dnsEncodeAccumulo("1-4"), accumuloSelector);
-        assertEq(accum14, getAccumuloHash("1.4.5"), "Accumulo 1-4 should resolve to 1.4.5");
+        assertEq(accum14, getAccumuloHash("1.4.1"), "Accumulo 1-4 should resolve to 1.4.1");
 
         // Phase 4: Continue Drupal 7.x and start 8.x
         publishDrupal("7.103", 7, 103, 0);
@@ -137,10 +139,10 @@ contract ScenarioTest is Test {
 
         // Phase 5: Accumulo 1.5.x - 1.9.x progression
         publishAccumulo("1.5.0", 1, 5, 0);
-        publishAccumulo("1.5.4", 1, 5, 4);
-        publishAccumulo("1.6.6", 1, 6, 6);
+        publishAccumulo("1.5.1", 1, 5, 1);
+        publishAccumulo("1.6.0", 1, 6, 0);
         publishAccumulo("1.9.0", 1, 9, 0);
-        publishAccumulo("1.9.3", 1, 9, 3);
+        publishAccumulo("1.9.1", 1, 9, 1);
 
         // Phase 6: Drupal 9.x series
         publishDrupal("9.0.14", 9, 0, 14);
@@ -149,14 +151,14 @@ contract ScenarioTest is Test {
 
         // Verify cross-isolation: Accumulo queries shouldn't see Drupal data
         bytes32 accum19 = decodeContenthash(dnsEncodeAccumulo("1-9"), accumuloSelector);
-        assertEq(accum19, getAccumuloHash("1.9.3"), "Accumulo 1-9 should resolve to 1.9.3");
+        assertEq(accum19, getAccumuloHash("1.9.1"), "Accumulo 1-9 should resolve to 1.9.1");
         bytes32 drupal9 = decodeContenthash(dnsEncodeDrupal("9"), drupalSelector);
         assertEq(drupal9, getDrupalHash("9.5.11"), "Drupal 9 should resolve to 9.5.11");
 
         // Phase 7: Accumulo 1.10.x and 2.x
-        publishAccumulo("1.10.3", 1, 10, 3);
+        publishAccumulo("1.10.0", 1, 10, 0);
         publishAccumulo("2.0.0", 2, 0, 0);
-        publishAccumulo("2.1.2", 2, 1, 2);
+        publishAccumulo("2.1.0", 2, 1, 0);
 
         // Phase 8: Drupal 10.x series
         publishDrupal("10.2.12", 10, 2, 12);
@@ -164,9 +166,9 @@ contract ScenarioTest is Test {
 
         // Verify major version queries for both
         bytes32 accum1 = decodeContenthash(dnsEncodeAccumulo("1"), accumuloSelector);
-        assertEq(accum1, getAccumuloHash("1.10.3"), "Accumulo 1 should resolve to 1.10.3");
+        assertEq(accum1, getAccumuloHash("1.10.0"), "Accumulo 1 should resolve to 1.10.0");
         bytes32 accum2 = decodeContenthash(dnsEncodeAccumulo("2"), accumuloSelector);
-        assertEq(accum2, getAccumuloHash("2.1.2"), "Accumulo 2 should resolve to 2.1.2");
+        assertEq(accum2, getAccumuloHash("2.1.0"), "Accumulo 2 should resolve to 2.1.0");
 
         bytes32 drupal10 = decodeContenthash(dnsEncodeDrupal("10"), drupalSelector);
         assertEq(drupal10, getDrupalHash("10.4.8"), "Drupal 10 should resolve to 10.4.8");
@@ -185,7 +187,7 @@ contract ScenarioTest is Test {
         bytes memory drupalTextSelector = abi.encodeWithSelector(ITextResolver.text.selector, DRUPAL_NODE, "version");
 
         string memory accum1Text = abi.decode(resolver.resolve(dnsEncodeAccumulo("1"), accumuloTextSelector), (string));
-        assertEq(accum1Text, "1.10.3", "Accumulo 1 text should be 1.10.3");
+        assertEq(accum1Text, "1.10.0", "Accumulo 1 text should be 1.10.0");
 
         string memory drupal9Text = abi.decode(resolver.resolve(dnsEncodeDrupal("9"), drupalTextSelector), (string));
         assertEq(drupal9Text, "9.5.11", "Drupal 9 text should be 9.5.11");
@@ -194,7 +196,7 @@ contract ScenarioTest is Test {
     /// @notice Test wildcard resolution isolation between projects
     function testWildcardIsolation() public {
         // Publish overlapping version numbers to both projects
-        publishAccumulo("1.9.2", 1, 9, 2);
+        publishAccumulo("1.9.0", 1, 9, 0);
         publishAccumulo("2.0.0", 2, 0, 0);
         publishDrupal("9.2.21", 9, 2, 21);
         publishDrupal("10.2.3", 10, 2, 3);
@@ -253,21 +255,20 @@ contract ScenarioTest is Test {
         // Advance Accumulo to 2.0.0
         publishAccumulo("2.0.0", 2, 0, 0);
 
-        // Try to publish Accumulo 1.6.0 (should fail - not greater than 2.0.0)
-        vm.prank(accumuloOwner);
-        vm.expectRevert(abi.encodeWithSignature("VersionNotGreater()"));
-        resolver.publishContent(ACCUMULO_NODE, 1, 6, 0, getAccumuloHash("1.6.0"));
+        // With component-wise ordering, 1.6.0 should succeed (different major.minor from 2.0.0)
+        publishAccumulo("1.6.0", 1, 6, 0);
 
         // Drupal should still be able to publish 10.0.0 (independent ordering)
         publishDrupal("10.0.0", 10, 0, 0);
 
+        // Latest should be 2.0.0 (highest overall)
         assertEq(resolver.text(ACCUMULO_NODE, "version"), "2.0.0");
         assertEq(resolver.text(DRUPAL_NODE, "version"), "10.0.0");
     }
 
     /// @notice Test querying non-existent versions doesn't cross-contaminate
     function testNonExistentVersionIsolation() public {
-        publishAccumulo("1.9.3", 1, 9, 3);
+        publishAccumulo("1.9.0", 1, 9, 0);
         publishDrupal("9.5.11", 9, 5, 11);
 
         bytes memory accumuloSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, ACCUMULO_NODE);
@@ -283,7 +284,7 @@ contract ScenarioTest is Test {
 
         // Verify the actual versions are still queryable
         bytes32 accum1 = decodeContenthash(dnsEncodeAccumulo("1"), accumuloSelector);
-        assertEq(accum1, getAccumuloHash("1.9.3"), "Accumulo 1 should exist");
+        assertEq(accum1, getAccumuloHash("1.9.0"), "Accumulo 1 should exist");
 
         bytes32 drupal9 = decodeContenthash(dnsEncodeDrupal("9"), drupalSelector);
         assertEq(drupal9, getDrupalHash("9.5.11"), "Drupal 9 should exist");
@@ -294,9 +295,23 @@ contract ScenarioTest is Test {
         // Publish similar version numbers to both projects
         publishAccumulo("1.9.0", 1, 9, 0);
         publishDrupal("9.1.0", 9, 1, 0);
+        publishAccumulo("1.9.1", 1, 9, 1);
+        publishDrupal("9.1.1", 9, 1, 1);
         publishAccumulo("1.9.2", 1, 9, 2);
         publishDrupal("9.1.2", 9, 1, 2);
         publishAccumulo("1.9.3", 1, 9, 3);
+        publishDrupal("9.1.3", 9, 1, 3);
+        publishDrupal("9.1.4", 9, 1, 4);
+        publishDrupal("9.1.5", 9, 1, 5);
+        publishDrupal("9.1.6", 9, 1, 6);
+        publishDrupal("9.1.7", 9, 1, 7);
+        publishDrupal("9.1.8", 9, 1, 8);
+        publishDrupal("9.1.9", 9, 1, 9);
+        publishDrupal("9.1.10", 9, 1, 10);
+        publishDrupal("9.1.11", 9, 1, 11);
+        publishDrupal("9.1.12", 9, 1, 12);
+        publishDrupal("9.1.13", 9, 1, 13);
+        publishDrupal("9.1.14", 9, 1, 14);
         publishDrupal("9.1.15", 9, 1, 15);
 
         bytes memory accumuloSelector = abi.encodeWithSelector(IContentHashResolver.contenthash.selector, ACCUMULO_NODE);
@@ -355,14 +370,14 @@ contract ScenarioTest is Test {
 
     /// @notice Test contenthash direct queries (non-wildcard) are isolated
     function testContenthashDirectQueryIsolation() public {
-        publishAccumulo("1.10.3", 1, 10, 3);
+        publishAccumulo("1.10.0", 1, 10, 0);
         publishDrupal("11.1.8", 11, 1, 8);
 
         // Direct contenthash queries
         bytes memory accumHash = resolver.contenthash(ACCUMULO_NODE);
         bytes memory drupalHash = resolver.contenthash(DRUPAL_NODE);
 
-        assertEq(accumHash, encodeIpfsContenthash(getAccumuloHash("1.10.3")), "Accumulo contenthash should be 1.10.3");
+        assertEq(accumHash, encodeIpfsContenthash(getAccumuloHash("1.10.0")), "Accumulo contenthash should be 1.10.0");
         assertEq(drupalHash, encodeIpfsContenthash(getDrupalHash("11.1.8")), "Drupal contenthash should be 11.1.8");
 
         // Verify they're different
