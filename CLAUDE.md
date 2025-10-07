@@ -8,6 +8,10 @@ NO TASK IS COMPLETE UNTIL:
 3. All compiler warnings have been resolved
 4. Unit test coverage of code in the src folder is maintained at 100%
 
+Constants and credentials are in the file `.env`. You will need to pass things to forge with flags.
+
+DO NOT DEPLOY TO MAINNET WITHOUT BEING ASKED TO.
+
 ## Project Overview
 
 SemverResolver is an ENS resolver implementing semantic versioning support for decentralized content distribution. It enables version-aware content resolution through ENS wildcard queries.
