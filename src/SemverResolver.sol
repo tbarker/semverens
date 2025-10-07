@@ -31,9 +31,9 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     bytes32 private constant VERSION_KEY_HASH = keccak256("version");
 
     // IPFS CIDv1 dag-pb contenthash with multihash prefix for ENS (EIP-1577)
-    // Format: <protocol><cid-version><content-type><hash-function><hash-length>
-    // 0xe3 = IPFS protocol, 0x01 = CIDv1, 0x70 = dag-pb, 0x12 = sha2-256, 0x20 = 32 bytes
-    bytes5 private constant IPFS_CONTENTHASH_PREFIX = hex"e301701220";
+    // Format: <protocol><cid-version><multicodec><hash-function><hash-length>
+    // 0xe3 = IPFS protocol, 0x01 = CIDv1, 0x01 = raw, 0x70 = dag-pb, 0x12 = sha2-256, 0x20 = 32 bytes
+    bytes6 private constant IPFS_CONTENTHASH_PREFIX = hex"e30101701220";
 
     ENS public immutable ENS_REGISTRY;
     INameWrapper public immutable NAME_WRAPPER;
@@ -99,7 +99,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     /// @dev Null safety: Returns empty bytes for zero hash (indicates no content)
     /// @dev Examples:
     ///   - _encodeIpfsContenthash(0x0) → "" (empty)
-    ///   - _encodeIpfsContenthash(sha256("content")) → 0xe301701220{32-byte-hash}
+    ///   - _encodeIpfsContenthash(sha256("content")) → 0xe30101701220{32-byte-hash}
     function _encodeIpfsContenthash(bytes32 rawHash) internal pure returns (bytes memory) {
         if (rawHash == bytes32(0)) {
             return "";

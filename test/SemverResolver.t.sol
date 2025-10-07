@@ -89,7 +89,7 @@ contract SemverResolverTest is Test {
         if (rawHash == bytes32(0)) {
             return "";
         }
-        return abi.encodePacked(hex"e301701220", rawHash);
+        return abi.encodePacked(hex"e30101701220", rawHash);
     }
 
     // === Version Text Resolution Tests ===

@@ -66,7 +66,7 @@ contract ScenarioTest is Test {
         if (rawHash == bytes32(0)) {
             return "";
         }
-        return abi.encodePacked(hex"e301701220", rawHash);
+        return abi.encodePacked(hex"e30101701220", rawHash);
     }
 
     // ========== Drupal Helpers ==========
@@ -99,12 +99,12 @@ contract ScenarioTest is Test {
         if (hashBytes.length == 0) {
             return bytes32(0);
         }
-        // Skip the 5-byte IPFS multihash prefix to get the raw hash
-        if (hashBytes.length < 37) {
-            // 5 byte prefix + 32 byte hash
+        // Skip the 6-byte IPFS multihash prefix to get the raw hash
+        if (hashBytes.length < 38) {
+            // 6 byte prefix + 32 byte hash
             return bytes32(0);
         }
-        return BytesUtils.readBytes32(hashBytes, 5);
+        return BytesUtils.readBytes32(hashBytes, 6);
     }
 
     /// @notice Comprehensive interleaved test of Accumulo and Drupal version histories
