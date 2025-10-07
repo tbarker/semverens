@@ -20,6 +20,13 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     // ABI encoding constants
     uint256 private constant SELECTOR_SIZE = 4;
 
+    // DNS encoding constants
+    uint256 private constant DNS_LABEL_LENGTH_OFFSET = 0; // Position of length byte in DNS label
+    uint256 private constant DNS_LABEL_DATA_OFFSET = 1; // Position where label data starts
+
+    // Array indexing constants
+    uint256 private constant FIRST_ELEMENT_INDEX = 0;
+
     // Precomputed hash for "version" key to save gas
     bytes32 private constant VERSION_KEY_HASH = keccak256("version");
 
@@ -77,7 +84,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         _;
     }
 
-    /// @notice Creates a new SemverResolver instance
+    /// @notice Creates a new SemverResolver that enables version-aware ENS resolution
     /// @param _ens The ENS registry contract address
     /// @param _nameWrapper The NameWrapper contract address
     constructor(ENS _ens, INameWrapper _nameWrapper) {
@@ -85,9 +92,14 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         NAME_WRAPPER = _nameWrapper;
     }
 
-    /// @dev Encodes a raw IPFS hash for ENS contenthash (EIP-1577)
-    /// @param rawHash Raw 32-byte IPFS hash (sha256 digest)
-    /// @return Properly encoded contenthash with IPFS CIDv1 dag-pb multihash prefix (0xe301701220)
+    /// @dev Encodes a raw IPFS hash for ENS contenthash (EIP-1577 compliance)
+    /// @param rawHash Raw 32-byte IPFS hash (sha256 digest only, not full CID)
+    /// @return Properly encoded contenthash with IPFS CIDv1 dag-pb multihash prefix
+    /// @dev Encoding format: 0xe3 (IPFS) + 0x01 (CIDv1) + 0x70 (dag-pb) + 0x12 (sha2-256) + 0x20 (32 bytes)
+    /// @dev Null safety: Returns empty bytes for zero hash (indicates no content)
+    /// @dev Examples:
+    ///   - _encodeIpfsContenthash(0x0) → "" (empty)
+    ///   - _encodeIpfsContenthash(sha256("content")) → 0xe301701220{32-byte-hash}
     function _encodeIpfsContenthash(bytes32 rawHash) internal pure returns (bytes memory) {
         if (rawHash == bytes32(0)) {
             return "";
@@ -96,7 +108,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         return abi.encodePacked(IPFS_CONTENTHASH_PREFIX, rawHash);
     }
 
-    /// @notice Checks if this contract implements a given interface
+    /// @notice Checks if this resolver supports a specific interface like contenthash or text resolution
     /// @param interfaceId The interface identifier to check (ERC-165)
     /// @return True if the interface is supported, false otherwise
     /// @dev Supports IExtendedResolver, IContentHashResolver, ITextResolver, and ERC165
@@ -106,11 +118,20 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
             || interfaceId == type(ITextResolver).interfaceId || interfaceId == 0x01ffc9a7; // ERC165
     }
 
-    /// @notice Wildcard resolution entry point (ENSIP-10)
-    /// @param name DNS-encoded name (e.g., "\x031-2\x06myapp\x03eth\x00")
+    /// @notice Resolves version-aware ENS queries like "1-2.myapp.eth" to find the highest matching 1.2.x version
+    /// @param name DNS-encoded name (e.g., "\x031-2\x06myapp\x03eth\x00" for "1-2.myapp.eth")
     /// @param data ABI-encoded function call (selector + arguments)
     /// @return ABI-encoded return value from the resolved function
-    /// @dev First tries direct resolution, falls back to wildcard if no result
+    /// @dev Supports two resolution profiles:
+    ///   1. IContentHashResolver.contenthash → returns IPFS content hash for version
+    ///   2. ITextResolver.text → returns version string for key="version"
+    /// @dev Resolution strategy:
+    ///   - First attempts direct resolution (exact name match)
+    ///   - Falls back to wildcard resolution if no direct match found
+    /// @dev Complexity: O(log n) where n is number of versions for the base name
+    /// @dev Examples:
+    ///   - resolve("1-2.myapp.eth", contenthash.selector) → content hash for highest 1.2.x version
+    ///   - resolve("1.myapp.eth", text.selector + "version") → version string for highest 1.x.x
     function resolve(bytes memory name, bytes memory data) external view override returns (bytes memory) {
         require(data.length >= SELECTOR_SIZE, "Invalid data length");
         bytes4 selector = bytes4(data);
@@ -138,7 +159,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         revert UnsupportedResolverProfile(selector);
     }
 
-    /// @notice Returns the content hash for the latest version of a name
+    /// @notice Gets the IPFS content hash for the latest version of an ENS name
     /// @param node The ENS namehash to query
     /// @return The content hash of the latest version as bytes, or empty if no versions exist
     /// @dev Implements IContentHashResolver interface for direct (non-wildcard) queries
@@ -147,7 +168,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         return _encodeIpfsContenthash(hash);
     }
 
-    /// @notice Returns text data for a given key
+    /// @notice Gets text data for an ENS name, currently only supports the "version" key
     /// @param node The ENS namehash to query
     /// @param key The text record key (only "version" is supported)
     /// @return The text value for the key, or empty string if not found or unsupported
@@ -179,46 +200,70 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     ///   - Exact: "1-2-3" → finds exact 1.2.3 version
     /// @notice Uses hyphen separators instead of dots to avoid DNS label conflicts
     /// @notice Returns zero version (0.0.0) if no matching version exists
+    /// @dev Complexity: Refactored into smaller functions for better readability
     function _resolveWildcardVersion(bytes memory name) internal view returns (VersionRecord memory) {
-        // Extract the first label from the DNS-encoded name
-        // Note: DNS name validation is handled upstream by NameCoder.namehash() in the resolve() function
-        // which will revert with DNSDecodingFailed for invalid names before reaching this point
-        uint256 labelLength = uint256(uint8(name[0]));
+        // Parse the DNS-encoded name to extract version and base components
+        (string memory versionLabel, bytes32 baseNode) = _extractVersionAndBaseName(name);
 
-        // Extract the version label (first label, e.g., "1-2" from "1-2.myapp.eth")
-        bytes memory versionLabel = BytesUtils.substring(name, 1, labelLength);
+        // Parse the version label to determine query parameters
+        ParsedVersion memory parsedVersion = _parseVersionFromLabel(versionLabel);
 
-        // Extract the remainder (base name, e.g., "myapp.eth" from "1-2.myapp.eth")
-        bytes memory baseName = BytesUtils.substring(name, labelLength + 1, name.length - labelLength - 1);
+        // Execute the appropriate version query based on parsed components
+        return _executeVersionQuery(baseNode, parsedVersion);
+    }
 
-        // Compute the namehash of the base name
-        bytes32 baseNode = NameCoder.namehash(baseName, 0);
+    /// @dev Extracts version label and base name from DNS-encoded name
+    /// @param name DNS-encoded name (e.g., "\x031-2\x06myapp\x03eth\x00")
+    /// @return versionLabel The version string from first label (e.g., "1-2")
+    /// @return baseNode The namehash of the base name (e.g., namehash("myapp.eth"))
+    /// @dev Example: "\x031-2\x06myapp\x03eth\x00" → ("1-2", namehash("myapp.eth"))
+    function _extractVersionAndBaseName(bytes memory name)
+        private
+        pure
+        returns (string memory versionLabel, bytes32 baseNode)
+    {
+        // Extract the first label length from DNS encoding
+        // Note: DNS name validation is handled upstream by NameCoder.namehash()
+        uint256 labelLength = uint256(uint8(name[DNS_LABEL_LENGTH_OFFSET]));
 
-        // Parse the version from the label (uses hyphen-separated format: "1-2-3")
-        // Note: _parseVersionFromLabel will revert if the label is invalid
-        // The resolve() function in IExtendedResolver will catch any reverts
-        ParsedVersion memory parsedVersion = _parseVersionFromLabel(string(versionLabel));
+        // Extract version label (first label after length byte)
+        bytes memory versionBytes = BytesUtils.substring(name, DNS_LABEL_DATA_OFFSET, labelLength);
+        versionLabel = string(versionBytes);
 
-        // Determine query type based on which components were explicitly specified
-        // "1" (hasMinor=false) → find highest 1.x.x
-        // "1-2" (hasMinor=true, hasPatch=false) → find highest 1.2.x
-        // "1-2-3" (hasPatch=true) → find exact 1.2.3
-        VersionRecord memory result;
+        // Extract base name (remainder after version label)
+        bytes memory baseName = BytesUtils.substring(
+            name, labelLength + DNS_LABEL_DATA_OFFSET, name.length - labelLength - DNS_LABEL_DATA_OFFSET
+        );
+        baseNode = NameCoder.namehash(baseName, FIRST_ELEMENT_INDEX);
+
+        return (versionLabel, baseNode);
+    }
+
+    /// @dev Executes the appropriate version query based on parsed version components
+    /// @param baseNode The namehash of the base ENS name
+    /// @param parsedVersion The parsed version with component flags
+    /// @return The matching version record or zero version if not found
+    /// @dev Query types:
+    ///   - Major only: hasMinor=false → getHighestVersionForMajor()
+    ///   - Major.minor: hasMinor=true, hasPatch=false → getHighestVersionForMajorMinor()
+    ///   - Exact: hasPatch=true → getExactVersion()
+    function _executeVersionQuery(bytes32 baseNode, ParsedVersion memory parsedVersion)
+        private
+        view
+        returns (VersionRecord memory)
+    {
+        Version memory version = parsedVersion.version;
 
         if (!parsedVersion.hasMinor) {
             // Major-only query: find highest version with matching major (e.g., "1" matches 1.x.x)
-            result = getHighestVersionForMajor(baseNode, parsedVersion.version.major);
+            return getHighestVersionForMajor(baseNode, version.major);
         } else if (!parsedVersion.hasPatch) {
             // Major.minor query: find highest version with matching major.minor (e.g., "1-2" matches 1.2.x)
-            result = getHighestVersionForMajorMinor(baseNode, parsedVersion.version.major, parsedVersion.version.minor);
+            return getHighestVersionForMajorMinor(baseNode, version.major, version.minor);
         } else {
             // Exact version query: find exact match (e.g., "1-2-3" matches 1.2.3 only)
-            result = getExactVersion(
-                baseNode, parsedVersion.version.major, parsedVersion.version.minor, parsedVersion.version.patch
-            );
+            return getExactVersion(baseNode, version.major, version.minor, version.patch);
         }
-
-        return result;
     }
 
     /// @dev Resolves contenthash for wildcard version queries
@@ -256,7 +301,7 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
         return _versionToString(result.version);
     }
 
-    /// @notice Publishes new versioned content for an ENS name
+    /// @notice Publishes a new version of content for your ENS name (e.g., version `major`.`minor`.`patch of your hash `contentHash`).
     /// @param namehash The ENS namehash to publish content for
     /// @param major The major version number (0-255)
     /// @param minor The minor version number (0-255)

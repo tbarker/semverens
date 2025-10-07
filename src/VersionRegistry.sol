@@ -3,13 +3,33 @@ pragma solidity ^0.8.19;
 
 import {SemverLib} from "./SemverLib.sol";
 
+/// @title VersionRegistry - Storage and retrieval constants
+contract VersionRegistryConstants {
+    // Version validation constants
+    uint8 internal constant ZERO_VERSION_MAJOR = 0;
+    uint8 internal constant ZERO_VERSION_MINOR = 0;
+    uint16 internal constant ZERO_VERSION_PATCH = 0;
+
+    // Binary search algorithm constants
+    uint256 internal constant SEARCH_NOT_FOUND = type(uint256).max;
+    uint256 internal constant ARRAY_START_INDEX = 0;
+
+    // Version comparison result constants
+    int8 internal constant COMPARISON_LESS = -1;
+    int8 internal constant COMPARISON_EQUAL = 0;
+    int8 internal constant COMPARISON_GREATER = 1;
+
+    // Patch version sequencing constants
+    uint16 internal constant PATCH_INCREMENT = 1;
+}
+
 /// @title VersionRegistry
 /// @notice Abstract contract for storing and querying versioned content by ENS namehash
 /// @dev Uses component-wise version ordering: major/minor can be added out of order,
 ///      but patch versions must be strictly sequential within each major.minor
 /// @dev Uses binary search for O(log n) version lookups
 /// @dev Example valid sequence: 1.1.4 → 2.0.0 → 1.1.5 → 1.2.0 → 2.0.1
-abstract contract VersionRegistry is SemverLib {
+abstract contract VersionRegistry is SemverLib, VersionRegistryConstants {
     /// @notice Represents a versioned content record
     /// @param version The semantic version (major.minor.patch)
     /// @param contentHash The IPFS or other content hash for this version
@@ -25,13 +45,25 @@ abstract contract VersionRegistry is SemverLib {
     error ZeroVersionNotAllowed();
     error PatchVersionNotSequential();
 
-    /// @dev Validates component-wise version ordering rules in a single pass
+    /// @notice Validates that a new version follows the required ordering rules
     /// @param versions Array of existing version records (sorted)
     /// @param newVersion The new version to validate
-    /// @notice Enforces rules:
+    /// @dev Enforces rules:
     ///   - Major and minor versions can be added out of chronological order (gaps allowed)
     ///   - Patch versions must be strictly sequential within same major.minor (no gaps)
     ///   - Example: 1.0.0 → 1.0.1 → 1.0.2 (valid), 1.0.0 → 1.0.2 (invalid)
+    /// @dev Validation rules:
+    ///   - Major and minor versions can be added out of chronological order (gaps allowed)
+    ///   - Patch versions must be strictly sequential within same major.minor (no gaps)
+    ///   - Duplicate versions are implicitly rejected by sequential check
+    /// @dev Complexity: O(n) where n is the number of existing versions
+    /// @dev Algorithm: Single pass to find highest patch for matching major.minor
+    ///      then validates new patch is exactly highest + 1 (for existing major.minor)
+    ///      or allows any patch value for new major.minor combinations
+    /// @dev Examples:
+    ///   - Existing: [1.0.0, 1.0.1] + New: 1.0.2 → valid (sequential patch)
+    ///   - Existing: [1.0.0, 1.0.1] + New: 1.0.0 → invalid (duplicate/backward)
+    ///   - Existing: [1.0.0, 1.0.1] + New: 2.0.5 → valid (new major.minor)
     function _validateComponentWiseOrder(VersionRecord[] storage versions, Version memory newVersion) private view {
         uint16 highestPatch = 0;
         bool foundMajorMinor = false;
@@ -51,16 +83,16 @@ abstract contract VersionRegistry is SemverLib {
 
         // For existing major.minor: patch must be exactly highestPatch + 1
         // For new major.minor: any patch value is allowed as the starting patch
-        if (foundMajorMinor && newVersion.patch != highestPatch + 1) {
+        if (foundMajorMinor && newVersion.patch != highestPatch + PATCH_INCREMENT) {
             revert PatchVersionNotSequential();
         }
     }
 
-    /// @dev Finds the insertion point for a new version using binary search
+    /// @notice Finds where to insert a new version in the sorted array to maintain order
     /// @param versions Array of existing version records (sorted)
     /// @param newVersion The version to find insertion point for
     /// @return The index where the new version should be inserted
-    /// @notice Inspired by OpenZeppelin Arrays.sol lowerBound implementation
+    /// @dev Inspired by OpenZeppelin Arrays.sol lowerBound implementation
     function _findInsertionPoint(VersionRecord[] storage versions, Version memory newVersion)
         private
         view
@@ -82,24 +114,35 @@ abstract contract VersionRegistry is SemverLib {
         return low;
     }
 
-    /// @dev Adds a new version to the registry using component-wise ordering
+    /// @notice Adds a new version of content to the registry for an ENS name
     /// @param namehash The ENS namehash to add the version for
     /// @param major The major version number (0-255)
     /// @param minor The minor version number (0-255)
     /// @param patch The patch version number (0-65535)
     /// @param contentHash The content hash for this version
-    /// @notice Component-wise ordering rules:
+    /// @dev Component-wise ordering rules:
     ///   - Major and minor versions can be added out of chronological order
     ///   - Patch versions must be strictly sequential within same major.minor
     ///   - Cannot add duplicate versions; no patch gaps allowed
-    /// @notice Reverts if version is 0.0.0 (reserved as sentinel value)
-    /// @notice Examples: 1.1.4 → 2.0.0 → 1.1.5 (valid), 1.1.4 → 1.1.3 (invalid)
+    /// @dev Reverts if version is 0.0.0 (reserved as sentinel value)
+    /// @dev Examples: 1.1.4 → 2.0.0 → 1.1.5 (valid), 1.1.4 → 1.1.3 (invalid)
+    /// @dev Component-wise ordering rules enforced:
+    ///   - Major and minor versions can be added out of chronological order (gaps allowed)
+    ///   - Patch versions must be strictly sequential within same major.minor (no gaps)
+    ///   - Cannot add duplicate versions; ensures patch continuity
+    /// @dev Complexity: O(n) for validation + O(log n) for insertion + O(n) for array shifting
+    ///      Total: O(n) where n is number of existing versions
+    /// @dev Version 0.0.0 is reserved as sentinel value and rejected
+    /// @dev Examples of valid sequences:
+    ///   - 1.1.0 → 1.1.1 → 2.0.0 → 1.1.2 (component-wise valid)
+    ///   - 1.0.0 → 1.0.2 (invalid: missing 1.0.1)
+    ///   - 2.0.0 → 1.0.0 (valid: different major versions)
     function addVersion(bytes32 namehash, uint8 major, uint8 minor, uint16 patch, bytes32 contentHash) internal {
         Version memory newVersion = _createVersion(major, minor, patch);
 
         // Reject version 0.0.0 as it's reserved for "no version" sentinel value
         // However, allow versions like 0.0.1, 0.1.0, etc. for pre-release/development
-        if (major == 0 && minor == 0 && patch == 0) {
+        if (major == ZERO_VERSION_MAJOR && minor == ZERO_VERSION_MINOR && patch == ZERO_VERSION_PATCH) {
             revert ZeroVersionNotAllowed();
         }
 
@@ -122,7 +165,7 @@ abstract contract VersionRegistry is SemverLib {
         versions[insertIndex] = newRecord;
     }
 
-    /// @dev Gets the content hash of the latest version for a given namehash
+    /// @notice Gets the content hash of the most recent version for an ENS name
     /// @param namehash The ENS namehash to query
     /// @return The content hash of the latest version, or bytes32(0) if no versions exist
     function getLatestContentHash(bytes32 namehash) internal view returns (bytes32) {
@@ -135,7 +178,7 @@ abstract contract VersionRegistry is SemverLib {
         return versions[versions.length - 1].contentHash;
     }
 
-    /// @dev Gets the latest version for a given namehash
+    /// @notice Gets the most recent version number for an ENS name
     /// @param namehash The ENS namehash to query
     /// @return The latest version, or Version(0,0,0) if no versions exist
     function getLatestVersion(bytes32 namehash) internal view returns (Version memory) {
@@ -148,11 +191,11 @@ abstract contract VersionRegistry is SemverLib {
         return versions[versions.length - 1].version;
     }
 
-    /// @dev Finds the highest version matching a given major version
+    /// @notice Finds the highest version with a specific major version number (e.g., highest 1.x.x)
     /// @param namehash The ENS namehash to search
     /// @param targetMajor The major version to match
     /// @return The highest version matching the major version, or zero version if not found
-    /// @notice Example: targetMajor=1 finds highest version like 1.x.x
+    /// @dev Example: targetMajor=1 finds highest version like 1.x.x
     function getHighestVersionForMajor(bytes32 namehash, uint8 targetMajor)
         internal
         view
@@ -161,12 +204,12 @@ abstract contract VersionRegistry is SemverLib {
         return _getHighestVersionMatching(namehash, targetMajor, 0, false);
     }
 
-    /// @dev Finds the highest version matching a given major.minor version
+    /// @notice Finds the highest version with specific major.minor numbers (e.g., highest 1.2.x)
     /// @param namehash The ENS namehash to search
     /// @param targetMajor The major version to match
     /// @param targetMinor The minor version to match
     /// @return The highest version matching the major.minor version, or zero version if not found
-    /// @notice Example: targetMajor=1, targetMinor=2 finds highest version like 1.2.x
+    /// @dev Example: targetMajor=1, targetMinor=2 finds highest version like 1.2.x
     function getHighestVersionForMajorMinor(bytes32 namehash, uint8 targetMajor, uint8 targetMinor)
         internal
         view
@@ -175,14 +218,14 @@ abstract contract VersionRegistry is SemverLib {
         return _getHighestVersionMatching(namehash, targetMajor, targetMinor, true);
     }
 
-    /// @dev Finds an exact version match
+    /// @notice Finds an exact version match (e.g., finds 1.2.3 exactly, not 1.2.4)
     /// @param namehash The ENS namehash to search
     /// @param targetMajor The major version to match
     /// @param targetMinor The minor version to match
     /// @param targetPatch The patch version to match
     /// @return The exact version record if found, or zero version if not found
-    /// @notice Example: targetMajor=1, targetMinor=2, targetPatch=3 finds version 1.2.3 only
-    /// @notice Uses binary search for O(log n) lookup
+    /// @dev Example: targetMajor=1, targetMinor=2, targetPatch=3 finds version 1.2.3 only
+    /// @dev Uses binary search for O(log n) lookup
     function getExactVersion(bytes32 namehash, uint8 targetMajor, uint8 targetMinor, uint16 targetPatch)
         internal
         view
@@ -191,7 +234,7 @@ abstract contract VersionRegistry is SemverLib {
         VersionRecord[] storage versions = versionRegistry[namehash];
 
         if (versions.length == 0) {
-            return VersionRecord({version: _createVersion(0, 0, 0), contentHash: bytes32(0)});
+            return _createZeroVersionRecord();
         }
 
         // Binary search for exact version match
@@ -221,7 +264,7 @@ abstract contract VersionRegistry is SemverLib {
         }
 
         // No exact match found
-        return VersionRecord({version: _createVersion(0, 0, 0), contentHash: bytes32(0)});
+        return _createZeroVersionRecord();
     }
 
     /// @dev Finds the highest version matching a given major (and optionally minor) version prefix
@@ -231,6 +274,7 @@ abstract contract VersionRegistry is SemverLib {
     /// @param includeMinor If true, match both major and minor; if false, match only major
     /// @return The highest matching version record, or zero version if no match found
     /// @notice Uses optimized binary search that finds the rightmost (highest) match directly in O(log n)
+    /// @dev Complexity: Extracted binary search algorithm for better maintainability
     function _getHighestVersionMatching(bytes32 namehash, uint8 targetMajor, uint8 targetMinor, bool includeMinor)
         private
         view
@@ -239,32 +283,63 @@ abstract contract VersionRegistry is SemverLib {
         VersionRecord[] storage versions = versionRegistry[namehash];
 
         if (versions.length == 0) {
-            return VersionRecord({version: _createVersion(0, 0, 0), contentHash: bytes32(0)});
+            return _createZeroVersionRecord();
         }
 
-        // Modified binary search that finds the rightmost (highest) matching version
-        // This eliminates the need for a linear scan
-        uint256 left = 0;
+        // Use specialized binary search to find the rightmost (highest) matching version
+        uint256 matchIndex = _binarySearchRightmostMatch(versions, targetMajor, targetMinor, includeMinor);
+
+        if (matchIndex == SEARCH_NOT_FOUND) {
+            return _createZeroVersionRecord();
+        }
+
+        return versions[matchIndex];
+    }
+
+    /// @dev Creates a zero version record (sentinel value for "no version found")
+    /// @return A version record with version 0.0.0 and empty content hash
+    function _createZeroVersionRecord() private pure returns (VersionRecord memory) {
+        return VersionRecord({
+            version: _createVersion(ZERO_VERSION_MAJOR, ZERO_VERSION_MINOR, ZERO_VERSION_PATCH),
+            contentHash: bytes32(0)
+        });
+    }
+
+    /// @dev Binary search algorithm that finds the rightmost (highest) matching version
+    /// @param versions Array of version records to search (must be sorted)
+    /// @param targetMajor The major version to match
+    /// @param targetMinor The minor version to match (only used if includeMinor is true)
+    /// @param includeMinor If true, match both major and minor; if false, match only major
+    /// @return Index of the rightmost matching version, or SEARCH_NOT_FOUND if no match
+    /// @dev Time Complexity: O(log n) where n is the number of versions
+    /// @dev Algorithm: Modified binary search that continues searching right after finding matches
+    ///      to ensure we get the highest patch version within the matching major[.minor] range
+    function _binarySearchRightmostMatch(
+        VersionRecord[] storage versions,
+        uint8 targetMajor,
+        uint8 targetMinor,
+        bool includeMinor
+    ) private view returns (uint256) {
+        uint256 left = ARRAY_START_INDEX;
         uint256 right = versions.length;
-        uint256 bestIndex = type(uint256).max;
+        uint256 bestIndex = SEARCH_NOT_FOUND;
 
         while (left < right) {
             uint256 mid = left + (right - left) / 2;
 
-            // Invariant: Ensures calculated midpoint is always within search range to prevent algorithm errors.
-            // Note: Array access safety (mid < versions.length) is automatically verified by outOfBounds target.
+            // Invariant: Ensures calculated midpoint is always within search range
             assert(mid >= left && mid < right);
 
             int8 comparison = _compareVersionPrefix(versions[mid].version, targetMajor, targetMinor, includeMinor);
 
-            // Invariant: Documents that comparison function contract returns only valid values (-1, 0, or 1)
-            assert(comparison >= -1 && comparison <= 1);
+            // Invariant: Comparison function returns only valid values (COMPARISON_LESS, COMPARISON_EQUAL, or COMPARISON_GREATER)
+            assert(comparison >= COMPARISON_LESS && comparison <= COMPARISON_GREATER);
 
             if (comparison < 0) {
-                // mid version is less than target, search right half
+                // Current version is less than target, search right half
                 left = mid + 1;
             } else if (comparison > 0) {
-                // mid version is greater than target, search left half
+                // Current version is greater than target, search left half
                 right = mid;
             } else {
                 // Found a matching version, record it and continue searching right
@@ -274,12 +349,7 @@ abstract contract VersionRegistry is SemverLib {
             }
         }
 
-        if (bestIndex == type(uint256).max) {
-            // No matching version found
-            return VersionRecord({version: _createVersion(0, 0, 0), contentHash: bytes32(0)});
-        }
-
-        return versions[bestIndex];
+        return bestIndex;
     }
 
     /// @dev Compares a version against an exact target version (major.minor.patch)
@@ -294,19 +364,19 @@ abstract contract VersionRegistry is SemverLib {
         returns (int8)
     {
         // Compare major version
-        if (version.major < targetMajor) return -1;
-        if (version.major > targetMajor) return 1;
+        if (version.major < targetMajor) return COMPARISON_LESS;
+        if (version.major > targetMajor) return COMPARISON_GREATER;
 
         // Compare minor version
-        if (version.minor < targetMinor) return -1;
-        if (version.minor > targetMinor) return 1;
+        if (version.minor < targetMinor) return COMPARISON_LESS;
+        if (version.minor > targetMinor) return COMPARISON_GREATER;
 
         // Compare patch version
-        if (version.patch < targetPatch) return -1;
-        if (version.patch > targetPatch) return 1;
+        if (version.patch < targetPatch) return COMPARISON_LESS;
+        if (version.patch > targetPatch) return COMPARISON_GREATER;
 
         // Exact match
-        return 0;
+        return COMPARISON_EQUAL;
     }
 
     /// @dev Compares a version against a target prefix (major or major.minor)
@@ -323,17 +393,17 @@ abstract contract VersionRegistry is SemverLib {
         returns (int8)
     {
         // Compare major version
-        if (version.major < targetMajor) return -1;
-        if (version.major > targetMajor) return 1;
+        if (version.major < targetMajor) return COMPARISON_LESS;
+        if (version.major > targetMajor) return COMPARISON_GREATER;
 
         // If we're only comparing major, they match (patch version is ignored)
-        if (!includeMinor) return 0;
+        if (!includeMinor) return COMPARISON_EQUAL;
 
         // Compare minor version
-        if (version.minor < targetMinor) return -1;
-        if (version.minor > targetMinor) return 1;
+        if (version.minor < targetMinor) return COMPARISON_LESS;
+        if (version.minor > targetMinor) return COMPARISON_GREATER;
 
         // Major and minor match (patch version is ignored)
-        return 0;
+        return COMPARISON_EQUAL;
     }
 }

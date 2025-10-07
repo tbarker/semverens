@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+
 /// @title SemverLib
 /// @notice Mixin contract for semantic version parsing, comparison, and manipulation
 /// @dev Supports major.minor.patch format with limited size (uint8.uint8.uint16)
@@ -14,6 +16,15 @@ abstract contract SemverLib {
 
     // Numeric constants
     uint8 private constant DECIMAL_BASE = 10;
+
+    // Version component limits (optimize for storage and common use cases)
+    uint8 private constant MAX_MAJOR_VERSION = type(uint8).max; // 255
+    uint8 private constant MAX_MINOR_VERSION = type(uint8).max; // 255
+    uint16 private constant MAX_PATCH_VERSION = type(uint16).max; // 65535
+
+    // String processing constants
+    uint256 private constant INITIAL_POSITION = 0;
+    uint256 private constant HYPHEN_SKIP_OFFSET = 1;
 
     struct Version {
         uint8 major; // Max 255
@@ -44,7 +55,11 @@ abstract contract SemverLib {
     function _versionToString(Version memory version) internal pure returns (string memory) {
         return string(
             abi.encodePacked(
-                _uintToString(version.major), ".", _uintToString(version.minor), ".", _uintToString(version.patch)
+                Strings.toString(version.major),
+                ".",
+                Strings.toString(version.minor),
+                ".",
+                Strings.toString(version.patch)
             )
         );
     }
@@ -69,7 +84,7 @@ abstract contract SemverLib {
         return _compare(a, b) == ComparisonResult.Greater;
     }
 
-    /// @notice Parses a hyphen-separated version label (for DNS labels, e.g., "1-2-3")
+    /// @notice Parses a version string like "1-2-3" into its major, minor, and patch components
     /// @param label Version label in format "major", "major-minor", or "major-minor-patch"
     /// @return Parsed version struct with metadata about which components were explicitly specified
     /// @dev Used for wildcard resolution: "1" → 1.0.0 (hasMinor=false), "1-2" → 1.2.0 (hasMinor=true, hasPatch=false)
@@ -78,48 +93,15 @@ abstract contract SemverLib {
     ///      - Empty components after hyphens (e.g., "1-" or "1-2-")
     ///      - Non-numeric characters (e.g., "abc")
     ///      - Numeric overflow beyond uint8/uint16 limits
+    /// @dev Complexity: Refactored into smaller functions for better maintainability
     function _parseVersionFromLabel(string memory label) internal pure returns (ParsedVersion memory) {
         bytes memory data = bytes(label);
-        // Note: DNS validation ensures basic label format but doesn't validate version semantics
 
-        uint256 pos = 0;
-        uint8 major = 0;
-        uint8 minor = 0;
-        uint16 patch = 0;
-        bool hasMinor = false;
-        bool hasPatch = false;
+        // Parse major version (always required)
+        (uint8 major, uint256 pos) = _parseMajorVersion(data);
 
-        // Parse major version (always present)
-        (uint256 majorValue, uint256 newPos) = _parseNumberUntil(data, pos, HYPHEN, type(uint8).max);
-        major = uint8(majorValue);
-        pos = newPos;
-
-        // Check if we have a hyphen for minor version
-        if (pos < data.length && data[pos] == HYPHEN) {
-            pos++; // Skip the '-'
-            require(pos < data.length, InvalidVersion()); // Prevent empty components like "1-"
-            hasMinor = true;
-
-            // Parse minor version
-            (uint256 minorValue, uint256 newPos2) = _parseNumberUntil(data, pos, HYPHEN, type(uint8).max);
-            minor = uint8(minorValue);
-            pos = newPos2;
-
-            // Check if we have another hyphen for patch version
-            if (pos < data.length && data[pos] == HYPHEN) {
-                pos++; // Skip the '-'
-                require(pos < data.length, InvalidVersion()); // Prevent empty components like "1-2-"
-                hasPatch = true;
-
-                // Parse patch version (rest of string, delimiter NULL_TERMINATOR = parse until end)
-                (uint256 patchValue, uint256 newPos3) = _parseNumberUntil(data, pos, NULL_TERMINATOR, type(uint16).max);
-                patch = uint16(patchValue);
-                pos = newPos3;
-            }
-        }
-
-        // Note: _parseNumberUntil allows trailing non-digit characters by design (stops parsing at first non-digit)
-        // This means "1abc" parses as major=1, which is acceptable for DNS label compatibility
+        // Parse optional minor and patch components
+        (uint8 minor, uint16 patch, bool hasMinor, bool hasPatch) = _parseMinorAndPatch(data, pos);
 
         return ParsedVersion({
             version: Version({major: major, minor: minor, patch: patch}),
@@ -128,6 +110,102 @@ abstract contract SemverLib {
         });
     }
 
+    /// @dev Parses the major version component from the beginning of the data
+    /// @param data The bytes representation of the version label
+    /// @return major The parsed major version (0-255)
+    /// @return newPos The position after parsing the major component
+    function _parseMajorVersion(bytes memory data) private pure returns (uint8 major, uint256 newPos) {
+        (uint256 majorValue, uint256 pos) = _parseNumberUntil(data, INITIAL_POSITION, HYPHEN, MAX_MAJOR_VERSION);
+        return (uint8(majorValue), pos);
+    }
+
+    /// @dev Parses optional minor and patch version components
+    /// @param data The bytes representation of the version label
+    /// @param startPos The position to start parsing from (after major component)
+    /// @return minor The parsed minor version (0 if not present)
+    /// @return patch The parsed patch version (0 if not present)
+    /// @return hasMinor True if minor component was explicitly specified
+    /// @return hasPatch True if patch component was explicitly specified
+    function _parseMinorAndPatch(bytes memory data, uint256 startPos)
+        private
+        pure
+        returns (uint8 minor, uint16 patch, bool hasMinor, bool hasPatch)
+    {
+        uint256 pos = startPos;
+
+        // Check for minor version component
+        if (_hasHyphenAt(data, pos)) {
+            (minor, pos, hasMinor) = _parseMinorComponent(data, pos);
+
+            // Check for patch version component
+            if (_hasHyphenAt(data, pos)) {
+                (patch, hasPatch) = _parsePatchComponent(data, pos);
+            }
+        }
+
+        return (minor, patch, hasMinor, hasPatch);
+    }
+
+    /// @dev Checks if there's a hyphen at the specified position
+    /// @param data The bytes to check
+    /// @param pos The position to check
+    /// @return True if there's a hyphen at the position
+    function _hasHyphenAt(bytes memory data, uint256 pos) private pure returns (bool) {
+        return pos < data.length && data[pos] == HYPHEN;
+    }
+
+    /// @dev Parses the minor version component
+    /// @param data The bytes representation of the version label
+    /// @param startPos The position of the hyphen before the minor component
+    /// @return minor The parsed minor version
+    /// @return newPos The position after parsing the minor component
+    /// @return hasMinor Always returns true (minor component was found)
+    function _parseMinorComponent(bytes memory data, uint256 startPos)
+        private
+        pure
+        returns (uint8 minor, uint256 newPos, bool hasMinor)
+    {
+        uint256 pos = startPos + HYPHEN_SKIP_OFFSET;
+        require(pos < data.length, InvalidVersion()); // Prevent empty components like "1-"
+
+        (uint256 minorValue, uint256 finalPos) = _parseNumberUntil(data, pos, HYPHEN, MAX_MINOR_VERSION);
+        return (uint8(minorValue), finalPos, true);
+    }
+
+    /// @dev Parses the patch version component
+    /// @param data The bytes representation of the version label
+    /// @param startPos The position of the hyphen before the patch component
+    /// @return patch The parsed patch version
+    /// @return hasPatch Always returns true (patch component was found)
+    function _parsePatchComponent(bytes memory data, uint256 startPos)
+        private
+        pure
+        returns (uint16 patch, bool hasPatch)
+    {
+        uint256 pos = startPos + HYPHEN_SKIP_OFFSET;
+        require(pos < data.length, InvalidVersion()); // Prevent empty components like "1-2-"
+
+        // Parse until end of string (NULL_TERMINATOR delimiter)
+        (uint256 patchValue,) = _parseNumberUntil(data, pos, NULL_TERMINATOR, MAX_PATCH_VERSION);
+        return (uint16(patchValue), true);
+    }
+
+    /// @dev Parses a numeric value from bytes until a delimiter is encountered
+    /// @param data The bytes to parse from
+    /// @param start The starting position in the bytes array
+    /// @param delimiter The byte to stop parsing at (or NULL_TERMINATOR for end of string)
+    /// @param maxValue Maximum allowed value to prevent overflow
+    /// @return number The parsed numeric value
+    /// @return newPos The position after the parsed number
+    /// @dev Complexity: O(k) where k is the number of digits parsed
+    /// @dev Edge cases handled:
+    ///   - Empty numeric components (e.g., "1-" or "1-2-") → reverts
+    ///   - Non-numeric characters → stops parsing (allows "1abc" → 1)
+    ///   - Overflow protection → checks before multiplication to prevent silent overflow
+    /// @dev Examples:
+    ///   - parseNumberUntil("123-456", 0, '-', 255) → (123, 3)
+    ///   - parseNumberUntil("123-456", 4, '\0', 255) → (456, 7)
+    ///   - parseNumberUntil("999", 0, '-', 255) → reverts (overflow)
     function _parseNumberUntil(bytes memory data, uint256 start, bytes1 delimiter, uint256 maxValue)
         private
         pure
@@ -162,31 +240,5 @@ abstract contract SemverLib {
         require(hasDigits, InvalidVersion());
 
         return (result, pos);
-    }
-
-    /// @dev Converts a uint256 to its string representation
-    /// @param value The uint256 value to convert
-    /// @return The string representation of the value
-    /// @notice Generic implementation used for uint8, uint16, and uint256 conversions
-    function _uintToString(uint256 value) private pure returns (string memory) {
-        if (value == 0) {
-            return "0";
-        }
-
-        uint256 temp = value;
-        uint256 digits = 0;
-        while (temp != 0) {
-            digits++;
-            temp /= DECIMAL_BASE;
-        }
-
-        bytes memory buffer = new bytes(digits);
-        while (value != 0) {
-            digits -= 1;
-            buffer[digits] = bytes1(uint8(ASCII_ZERO_UINT + uint8(value % DECIMAL_BASE)));
-            value /= DECIMAL_BASE;
-        }
-
-        return string(buffer);
     }
 }
