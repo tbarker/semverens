@@ -136,23 +136,41 @@ function loadContractABI() {
 }
 
 /**
- * Checks if a specific version already exists by attempting a dry-run
- * Since getExactVersion is internal, we'll try to estimate gas for the transaction
- * and catch the specific "VersionNotGreater" error
+ * Checks if a specific version already exists by attempting to publish and catching specific errors
  */
 async function checkVersionExists(contract, targetNamehash, major, minor, patch, contentHash) {
   try {
     // Try to estimate gas for the publishContent transaction
-    // If the version already exists, this should fail with VersionNotGreater
     await contract.publishContent.estimateGas(targetNamehash, major, minor, patch, contentHash);
     return false; // If no error, version doesn't exist
   } catch (error) {
-    // Check if the error is "VersionNotGreater" which means version already exists
-    // The error data for VersionNotGreater would be 0x9397b3c0
-    if (error.data && (error.data.includes('9397b3c0') || error.message.includes('VersionNotGreater'))) {
-      return true; // Version already exists
+    // Check for specific error codes that indicate the version already exists
+    if (error.data) {
+      const errorData = error.data.toLowerCase();
+      
+      // PatchVersionNotSequential: This means we're trying to add a version that violates ordering
+      // This typically happens when the version already exists or is out of sequence
+      if (errorData === '0x1c22110f') {
+        return true; // Version likely already exists
+      }
+      
+      // Check for other version-related errors
+      if (errorData.includes('1c22110f')) {
+        return true; // PatchVersionNotSequential - version exists
+      }
     }
-    // For other errors (like authorization), assume version doesn't exist
+    
+    // Check error message for version-related issues
+    if (error.message && (
+      error.message.includes('PatchVersionNotSequential') ||
+      error.message.includes('VersionNotGreater') ||
+      error.message.includes('revert')
+    )) {
+      return true; // Version already exists or violates ordering
+    }
+    
+    // For authorization errors or other issues, assume version doesn't exist
+    // and let the actual publish call handle the error properly
     return false;
   }
 }
