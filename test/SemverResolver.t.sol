@@ -191,6 +191,77 @@ contract SemverResolverTest is Test {
         assertEq(version, "2.1.5");
     }
 
+    function testPublishContentEmitsParentVersionEvents() public {
+        // First, publish version 1.0.0 - should emit events for base, major.minor (1.0), and major (1)
+        vm.prank(owner);
+
+        // Calculate namehashes for version queries using ENS NameCoder
+        bytes32 majorNamehash = NameCoder.namehash(TEST_NODE, keccak256("1"));
+        bytes32 majorMinorNamehash = NameCoder.namehash(TEST_NODE, keccak256("1-0"));
+
+        // Expect 6 events: 2 for base (exact), 2 for major.minor, 2 for major
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(TEST_NODE, encodeIpfsContenthash(CONTENT_HASH_1));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(TEST_NODE, "version", "version", "1.0.0");
+
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(majorMinorNamehash, encodeIpfsContenthash(CONTENT_HASH_1));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(majorMinorNamehash, "version", "version", "1.0.0");
+
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(majorNamehash, encodeIpfsContenthash(CONTENT_HASH_1));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(majorNamehash, "version", "version", "1.0.0");
+
+        resolver.publishContent(TEST_NODE, 1, 0, 0, CONTENT_HASH_1);
+
+        // Now publish version 1.0.1 - should emit events for base and major.minor (1.0), but NOT major (1) since 1.0.1 is still latest for major 1
+        vm.prank(owner);
+
+        // Only expect 4 events: 2 for base (exact), 2 for major.minor (since 1.0.1 is new highest for 1.0.x)
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(TEST_NODE, encodeIpfsContenthash(CONTENT_HASH_2));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(TEST_NODE, "version", "version", "1.0.1");
+
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(majorMinorNamehash, encodeIpfsContenthash(CONTENT_HASH_2));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(majorMinorNamehash, "version", "version", "1.0.1");
+
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(majorNamehash, encodeIpfsContenthash(CONTENT_HASH_2));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(majorNamehash, "version", "version", "1.0.1");
+
+        resolver.publishContent(TEST_NODE, 1, 0, 1, CONTENT_HASH_2);
+
+        // Now publish version 1.1.0 - should emit events for base, major.minor (1.1), and major (1) since it's new highest for major 1
+        vm.prank(owner);
+
+        bytes32 newMajorMinorNamehash = NameCoder.namehash(TEST_NODE, keccak256("1-1"));
+
+        // Expect 6 events: 2 for base, 2 for major.minor (1.1), 2 for major (1)
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(TEST_NODE, encodeIpfsContenthash(CONTENT_HASH_3));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(TEST_NODE, "version", "version", "1.1.0");
+
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(newMajorMinorNamehash, encodeIpfsContenthash(CONTENT_HASH_3));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(newMajorMinorNamehash, "version", "version", "1.1.0");
+
+        vm.expectEmit(true, false, false, true);
+        emit IContentHashResolver.ContenthashChanged(majorNamehash, encodeIpfsContenthash(CONTENT_HASH_3));
+        vm.expectEmit(true, false, false, true);
+        emit ITextResolver.TextChanged(majorNamehash, "version", "version", "1.1.0");
+
+        resolver.publishContent(TEST_NODE, 1, 1, 0, CONTENT_HASH_3);
+    }
+
     // === Edge Cases ===
 
     function testTextVersionKeyCaseSensitive() public {

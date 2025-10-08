@@ -3,6 +3,7 @@ pragma solidity ^0.8.19;
 
 // Using IERC165 from forge-std to avoid OpenZeppelin version conflicts
 import {IERC165} from "forge-std/interfaces/IERC165.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {ENS} from "ens-contracts/registry/ENS.sol";
 import {IExtendedResolver} from "ens-contracts/resolvers/profiles/IExtendedResolver.sol";
 import {IContentHashResolver} from "ens-contracts/resolvers/profiles/IContentHashResolver.sol";
@@ -27,8 +28,11 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     // Array indexing constants
     uint256 private constant FIRST_ELEMENT_INDEX = 0;
 
+    // Version label constant
+    string private constant VERSION_LABEL = "version";
+
     // Precomputed hash for "version" key to save gas
-    bytes32 private constant VERSION_KEY_HASH = keccak256("version");
+    bytes32 private constant VERSION_KEY_HASH = keccak256(bytes(VERSION_LABEL));
 
     // IPFS CIDv1 dag-pb contenthash with multihash prefix for ENS (EIP-1577)
     // Format: <protocol><cid-version><multicodec><hash-function><hash-length>
@@ -314,18 +318,66 @@ contract SemverResolver is VersionRegistry, IExtendedResolver, IContentHashResol
     /// @dev The resolver automatically encodes this as EIP-1577 contenthash for ENS compatibility
     /// @dev Only callable by the ENS name owner or approved operators
     /// @dev Version must be strictly greater than all existing versions (enforced by addVersion)
-    /// @dev Emits ContenthashChanged and TextChanged events
+    /// @dev Emits ContenthashChanged and TextChanged events for the exact version and parent versions that resolve to it
     function publishContent(bytes32 namehash, uint8 major, uint8 minor, uint16 patch, bytes32 contentHash)
         external
         authorised(namehash)
     {
         addVersion(namehash, major, minor, patch, contentHash);
 
-        // Emit ContenthashChanged event for the new content hash
-        emit ContenthashChanged(namehash, _encodeIpfsContenthash(contentHash));
+        bytes memory encodedContenthash = _encodeIpfsContenthash(contentHash);
+        string memory newVersionString = _versionToString(_createVersion(major, minor, patch));
 
-        // Emit TextChanged event for the "version" key since it will now return the new version
-        string memory newVersion = _versionToString(_createVersion(major, minor, patch));
-        emit TextChanged(namehash, "version", "version", newVersion);
+        // Emit ContenthashChanged event for the exact version (base namehash)
+        emit ContenthashChanged(namehash, encodedContenthash);
+
+        // Emit TextChanged event for the "version" key for the exact version
+        emit TextChanged(namehash, VERSION_LABEL, VERSION_LABEL, newVersionString);
+
+        // Check if this new version is now the highest patch for this major.minor
+        // If so, emit events for the major.minor version queries (e.g., "1-2.ebooks.thomasoncrypto.eth")
+        VersionRecord memory currentHighestForMajorMinor = getHighestVersionForMajorMinor(namehash, major, minor);
+        if (currentHighestForMajorMinor.version.patch == patch) {
+            // This new version is the highest for its major.minor - emit events for major.minor queries
+            bytes32 majorMinorNamehash = _computeVersionNamehash(namehash, major, minor, false);
+            emit ContenthashChanged(majorMinorNamehash, encodedContenthash);
+            emit TextChanged(majorMinorNamehash, VERSION_LABEL, VERSION_LABEL, newVersionString);
+        }
+
+        // Check if this new version is now the highest overall for this major
+        // If so, emit events for the major version queries (e.g., "1.ebooks.thomasoncrypto.eth")
+        VersionRecord memory currentHighestForMajor = getHighestVersionForMajor(namehash, major);
+        if (
+            currentHighestForMajor.version.major == major && currentHighestForMajor.version.minor == minor
+                && currentHighestForMajor.version.patch == patch
+        ) {
+            // This new version is the highest for its major - emit events for major queries
+            bytes32 majorNamehash = _computeVersionNamehash(namehash, major, 0, true);
+            emit ContenthashChanged(majorNamehash, encodedContenthash);
+            emit TextChanged(majorNamehash, VERSION_LABEL, VERSION_LABEL, newVersionString);
+        }
+    }
+
+    /// @dev Computes the namehash for version-specific subdomains
+    /// @param baseNamehash The base ENS namehash (e.g., for "ebooks.thomasoncrypto.eth")
+    /// @param major The major version number
+    /// @param minor The minor version number (ignored if majorOnly is true)
+    /// @param majorOnly If true, computes hash for "1.base", if false for "1-2.base"
+    /// @return The computed namehash for the version subdomain
+    function _computeVersionNamehash(bytes32 baseNamehash, uint8 major, uint8 minor, bool majorOnly)
+        private
+        pure
+        returns (bytes32)
+    {
+        string memory versionLabel;
+        if (majorOnly) {
+            versionLabel = Strings.toString(major);
+        } else {
+            versionLabel = string(abi.encodePacked(Strings.toString(major), "-", Strings.toString(minor)));
+        }
+
+        // Use ENS NameCoder to properly compute the namehash for version subdomain
+        bytes32 labelHash = keccak256(bytes(versionLabel));
+        return NameCoder.namehash(baseNamehash, labelHash);
     }
 }
