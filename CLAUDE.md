@@ -10,6 +10,8 @@ NO TASK IS COMPLETE UNTIL:
 
 Constants and credentials are in the file `.env`. You will need to pass things to forge with flags.
 
+ENS names will often be NameWrapper-controlled names.
+Use cast for simply tasks.
 DO NOT DEPLOY TO MAINNET WITHOUT BEING ASKED TO.
 
 ## Project Overview
